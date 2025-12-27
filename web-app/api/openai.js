@@ -54,7 +54,8 @@ module.exports = async (req, res) => {
         model,
         messages,
         max_tokens,
-        temperature
+        temperature,
+        response_format: { type: "json_object" }
       })
     });
 
