@@ -1468,10 +1468,15 @@ export const getDetailedRecipe = async (meal, profile) => {
     'You are a professional chef and recipe developer.'}`;
 
   try {
-    const response = await callGPT([
+    let response = await callGPT([
       { role: 'system', content: systemPrompt },
       { role: 'user', content: prompt }
     ]);
+
+    // Strip markdown code blocks if present
+    if (response.includes('```')) {
+      response = response.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+    }
 
     const recipe = JSON.parse(response);
   
@@ -1562,7 +1567,7 @@ export const generateQuickMeal = async (pantryItems, profile) => {
       }
     }`;
 
-  const response = await callGPT([
+  let response = await callGPT([
     { role: 'system', content: `You are a JSON-only quick meal API. OUTPUT RULES:
     - Output ONLY valid JSON. No markdown. No explanations. No apologies.
     - Start your response with { and end with }
@@ -1572,6 +1577,11 @@ export const generateQuickMeal = async (pantryItems, profile) => {
     You are a creative chef who makes delicious meals from available ingredients.` },
     { role: 'user', content: prompt }
   ]);
+
+  // Strip markdown code blocks if present
+  if (response.includes('```')) {
+    response = response.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+  }
 
   return JSON.parse(response);
 };
