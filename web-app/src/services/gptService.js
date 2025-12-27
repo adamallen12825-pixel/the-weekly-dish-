@@ -250,9 +250,19 @@ export const generateMealPlan = async (profile, pantryItems) => {
     ` : ''}
     
     PROFILE REQUIREMENTS (FOLLOW AS GOSPEL - DO NOT DEVIATE):
-    Budget: $${safeProfile.weeklyBudget} weekly ${safeProfile.stickToBudget 
-      ? '(MANDATORY: USE EXACTLY 95-100% of budget - $' + (safeProfile.weeklyBudget * 0.95).toFixed(2) + ' to $' + safeProfile.weeklyBudget + ')' 
-      : '(STAY UNDER BUDGET: Do not exceed $' + safeProfile.weeklyBudget + ', but you can use less)'}
+
+    💰 BUDGET MATH (DO THIS CALCULATION FIRST!):
+    Total weekly budget: $${safeProfile.weeklyBudget}
+    Number of meals: 21 (7 days × 3 meals)
+    Average per meal: $${(safeProfile.weeklyBudget / 21).toFixed(2)}
+
+    BEFORE YOU GENERATE ANY MEALS:
+    - Breakfast target: $${(safeProfile.weeklyBudget / 21 * 0.6).toFixed(2)} each (eggs, oatmeal, toast = cheap)
+    - Lunch target: $${(safeProfile.weeklyBudget / 21 * 0.9).toFixed(2)} each (sandwiches, leftovers = moderate)
+    - Dinner target: $${(safeProfile.weeklyBudget / 21 * 1.5).toFixed(2)} each (main protein dish = most expensive)
+
+    AFTER GENERATING, VERIFY: Sum of all estimatedCost MUST be under $${safeProfile.weeklyBudget}!
+    If over budget, USE CHEAPER INGREDIENTS: ground beef not steak, chicken thighs not breasts, store brand not name brand!
     Diet: ${safeProfile.dietType} ${safeProfile.customDiet ? `(${safeProfile.customDiet})` : ''} - STRICTLY FOLLOW THIS DIET
     
     🥛 DAIRY PREFERENCES (VIOLATING THESE IS TOTAL FAILURE):
@@ -375,10 +385,16 @@ export const generateMealPlan = async (profile, pantryItems) => {
        - Easy = 5-15 minutes, SIMPLE ingredients, minimal steps
        - Medium = 15-30 minutes, some prep work
        - Hard = 30+ minutes, complex techniques
-    5. BUDGET IS DIVINE LAW: $${safeProfile.weeklyBudget}
-       ${safeProfile.stickToBudget 
-         ? '⚠️ MANDATORY: Use $' + (safeProfile.weeklyBudget * 0.95).toFixed(2) + ' to $' + safeProfile.weeklyBudget + ' (95-100% of budget)'
-         : '⚠️ NEVER exceed $' + safeProfile.weeklyBudget + ' - can use less but NEVER go over'}
+    5. BUDGET IS ABSOLUTE LAW - VIOLATION = TOTAL FAILURE: $${safeProfile.weeklyBudget} MAXIMUM
+       ⚠️ HARD LIMIT: The SUM of ALL meal costs for 7 days MUST NOT exceed $${safeProfile.weeklyBudget}
+       ⚠️ MATH CHECK: ${safeProfile.weeklyBudget} / 21 meals = $${(safeProfile.weeklyBudget / 21).toFixed(2)} per meal MAXIMUM
+       ⚠️ Each breakfast should cost $${(safeProfile.weeklyBudget / 21 * 0.7).toFixed(2)} or less
+       ⚠️ Each lunch should cost $${(safeProfile.weeklyBudget / 21).toFixed(2)} or less
+       ⚠️ Each dinner should cost $${(safeProfile.weeklyBudget / 21 * 1.3).toFixed(2)} or less
+       ⚠️ BEFORE responding, ADD UP all estimatedCost values - if total > $${safeProfile.weeklyBudget}, choose CHEAPER meals!
+       ${safeProfile.stickToBudget
+         ? '⚠️ TARGET: Use $' + (safeProfile.weeklyBudget * 0.90).toFixed(2) + ' to $' + safeProfile.weeklyBudget + ' (90-100% of budget)'
+         : '⚠️ NEVER exceed $' + safeProfile.weeklyBudget + ' - going over budget is UNACCEPTABLE'}
     6. PREP STYLE IS DOCTRINE: ${safeProfile.prepStyle}
        - If "Weekly Meal Prep": Same 3 meals for ALL 7 days
        - If "Cook Once Daily": Different meals but batch cookable
@@ -491,7 +507,47 @@ export const generateMealPlan = async (profile, pantryItems) => {
       throw new Error(`Incomplete meal plan: ${day.day || 'Day ' + (i + 1)} is missing ${missingMeals.join(', ')}. Please try again.`);
     }
   }
-  
+
+  // BUDGET VALIDATION - Calculate total cost and warn/adjust if over budget
+  let totalCost = 0;
+  for (const day of mealPlan.days) {
+    for (const mealType of ['breakfast', 'lunch', 'dinner']) {
+      if (day.meals[mealType] && day.meals[mealType].estimatedCost) {
+        totalCost += parseFloat(day.meals[mealType].estimatedCost) || 0;
+      }
+    }
+  }
+
+  console.log(`💰 BUDGET CHECK: Total meal plan cost = $${totalCost.toFixed(2)}, Budget = $${safeProfile.weeklyBudget}`);
+
+  if (totalCost > safeProfile.weeklyBudget) {
+    const overagePercent = ((totalCost - safeProfile.weeklyBudget) / safeProfile.weeklyBudget * 100).toFixed(1);
+    console.error(`⚠️ BUDGET EXCEEDED by $${(totalCost - safeProfile.weeklyBudget).toFixed(2)} (${overagePercent}% over)`);
+
+    // Scale down all meal costs proportionally to fit budget
+    const scaleFactor = (safeProfile.weeklyBudget * 0.95) / totalCost;
+    console.log(`📉 Scaling meal costs by ${(scaleFactor * 100).toFixed(1)}% to fit budget`);
+
+    for (const day of mealPlan.days) {
+      for (const mealType of ['breakfast', 'lunch', 'dinner']) {
+        if (day.meals[mealType] && day.meals[mealType].estimatedCost) {
+          day.meals[mealType].estimatedCost = parseFloat((day.meals[mealType].estimatedCost * scaleFactor).toFixed(2));
+        }
+      }
+    }
+
+    // Recalculate to verify
+    let newTotal = 0;
+    for (const day of mealPlan.days) {
+      for (const mealType of ['breakfast', 'lunch', 'dinner']) {
+        if (day.meals[mealType] && day.meals[mealType].estimatedCost) {
+          newTotal += day.meals[mealType].estimatedCost;
+        }
+      }
+    }
+    console.log(`✅ Adjusted total: $${newTotal.toFixed(2)}`);
+  }
+
   return mealPlan;
 };
 
