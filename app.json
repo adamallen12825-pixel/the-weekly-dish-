@@ -1,0 +1,38 @@
+{
+  "expo": {
+    "name": "TheWeeklyDish",
+    "slug": "TheWeeklyDish",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#f5f5f5"
+    },
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#f5f5f5"
+      },
+      "package": "com.theweeklydish.app",
+      "edgeToEdgeEnabled": true
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow The Weekly Dish to access your camera to scan pantry items and barcodes."
+        }
+      ]
+    ]
+  }
+}

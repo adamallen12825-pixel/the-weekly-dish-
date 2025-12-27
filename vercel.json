@@ -1,0 +1,16 @@
+{
+  "installCommand": "cd web-app && npm install",
+  "buildCommand": "cd web-app && npm run build",
+  "outputDirectory": "web-app/build",
+  "functions": {
+    "api/openai.js": {
+      "maxDuration": 60
+    },
+    "api/kv.js": {
+      "maxDuration": 10
+    },
+    "api/**/*.js": {
+      "maxDuration": 30
+    }
+  }
+}

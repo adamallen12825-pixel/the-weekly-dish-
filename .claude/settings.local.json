@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(C:\\Users\\aaran\\The Weekly Dish/**)",
+      "Read(C:\\Users\\aaran\\The Weekly Dish/**)",
+      "Read(C:\\Users\\aaran\\The Weekly Dish/**)",
+      "Read(C:\\Users\\aaran\\The Weekly Dish/**)",
+      "Read(C:\\Users\\aaran\\The Weekly Dish/**)",
+      "Read(C:\\Users\\aaran\\The Weekly Dish/**)",
+      "Read(C:\\Users\\aaran\\The Weekly Dish/**)",
+      "Read(//c/Users/aaran/The Weekly Dish/**)",
+      "Bash(vercel env add:*)",
+      "Bash(vercel env rm:*)",
+      "Bash(vercel --prod:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

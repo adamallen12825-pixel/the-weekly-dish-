@@ -1,0 +1,286 @@
+.shopping-list-container {
+  padding: 20px;
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.list-header {
+  background: white;
+  padding: 20px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.budget-info {
+  display: flex;
+  justify-content: space-between;
+  font-size: 18px;
+  font-weight: 500;
+}
+
+.budget-info span:first-child {
+  color: #4CAF50;
+}
+
+.shopping-sections {
+  background: white;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.category-section {
+  margin-bottom: 30px;
+}
+
+.category-section h3 {
+  color: #333;
+  margin-bottom: 15px;
+  padding-bottom: 10px;
+  border-bottom: 2px solid #f0f0f0;
+}
+
+.items-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.shopping-item {
+  display: flex;
+  align-items: center;
+  padding: 12px;
+  background: #f9f9f9;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.shopping-item:hover {
+  background: #f0f0f0;
+}
+
+.shopping-item.checked {
+  opacity: 0.6;
+}
+
+.shopping-item.checked .item-name {
+  text-decoration: line-through;
+}
+
+.shopping-item input[type="checkbox"] {
+  margin-right: 12px;
+  width: 20px;
+  height: 20px;
+  cursor: pointer;
+}
+
+.item-details {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex: 1;
+}
+
+.item-name {
+  font-weight: 500;
+  color: #333;
+}
+
+.item-price {
+  color: #4CAF50;
+  font-weight: 500;
+  font-size: 14px;
+}
+
+.tips-section {
+  background: #e8f5e9;
+  padding: 20px;
+  border-radius: 8px;
+  margin-top: 20px;
+}
+
+.tips-section h3 {
+  color: #2e7d32;
+  margin-bottom: 15px;
+}
+
+.tips-section ul {
+  list-style: none;
+  padding: 0;
+}
+
+.tips-section li {
+  padding: 8px 0;
+  padding-left: 25px;
+  position: relative;
+}
+
+.tips-section li:before {
+  content: '💡';
+  position: absolute;
+  left: 0;
+}
+
+.walmart-section {
+  margin-top: 30px;
+  text-align: center;
+  padding: 20px;
+  background: #f8f9fa;
+  border-radius: 8px;
+}
+
+.walmart-cart-btn {
+  padding: 15px 40px;
+  background: #0071dc;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 18px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.walmart-cart-btn:hover:not(:disabled) {
+  background: #005a9e;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 113, 220, 0.3);
+}
+
+.walmart-cart-btn:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+}
+
+.walmart-results {
+  margin-top: 15px;
+  padding: 10px;
+  background: white;
+  border-radius: 6px;
+  font-size: 14px;
+}
+
+.walmart-results p {
+  margin: 5px 0;
+  color: #333;
+}
+
+.unmatched-warning {
+  color: #ff6b00 !important;
+  font-weight: 500;
+}
+
+.empty-message {
+  text-align: center;
+  padding: 60px 20px;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  color: #666;
+  font-size: 16px;
+}
+
+.list-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.print-btn:hover {
+  background: #e0e0e0 !important;
+}
+
+/* Print styles */
+@media print {
+  /* Hide everything except shopping list content */
+  body * {
+    visibility: hidden;
+  }
+  
+  .shopping-list-container,
+  .shopping-list-container * {
+    visibility: visible;
+  }
+  
+  .shopping-list-container {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 10px;
+  }
+  
+  /* Hide non-printable elements */
+  .walmart-notice,
+  .walmart-section,
+  .print-btn,
+  .tips-section {
+    display: none !important;
+  }
+  
+  /* Clean up the print layout */
+  .shopping-sections {
+    box-shadow: none !important;
+    padding: 10px !important;
+  }
+  
+  .list-header {
+    box-shadow: none !important;
+    border-bottom: 2px solid #333;
+    margin-bottom: 20px;
+    padding-bottom: 10px;
+  }
+  
+  .category-section h3 {
+    font-size: 16px;
+    font-weight: bold;
+    border-bottom: 1px solid #333;
+    page-break-after: avoid;
+  }
+  
+  .shopping-item {
+    background: none !important;
+    border: none !important;
+    padding: 5px 0 !important;
+    page-break-inside: avoid;
+  }
+  
+  .shopping-item:hover {
+    background: none !important;
+  }
+  
+  /* Show checkboxes for manual checking */
+  .shopping-item input[type="checkbox"] {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+  
+  /* Remove link styling */
+  .shopping-item a {
+    color: #000 !important;
+    text-decoration: none !important;
+  }
+  
+  /* Format prices clearly */
+  .item-price {
+    color: #000 !important;
+    font-weight: bold;
+  }
+  
+  /* Add page break control */
+  .category-section {
+    page-break-inside: avoid;
+  }
+  
+  /* Add header on each page */
+  @page {
+    margin: 0.5in;
+  }
+  
+  h2 {
+    font-size: 20px;
+    margin-bottom: 10px;
+  }
+}

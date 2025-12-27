@@ -1,0 +1,13 @@
+{
+  "buildCommand": "npm run build",
+  "outputDirectory": "build",
+  "framework": "create-react-app",
+  "functions": {
+    "api/kv.js": {
+      "maxDuration": 10
+    },
+    "api/test.js": {
+      "maxDuration": 10
+    }
+  }
+}

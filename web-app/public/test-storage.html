@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Storage Test</title>
+</head>
+<body>
+    <h1>Storage API Test</h1>
+    <button onclick="testAPI()">Test Storage API</button>
+    <pre id="output"></pre>
+    
+    <script>
+        async function testAPI() {
+            const output = document.getElementById('output');
+            const userId = 'test-user-' + Date.now();
+            const testData = { test: 'data', timestamp: new Date().toISOString() };
+            
+            output.textContent = 'Testing storage API...\n\n';
+            
+            // Test POST (save)
+            try {
+                output.textContent += '1. Testing POST to /api/kv/...\n';
+                const saveRes = await fetch(`/api/kv/${userId}/testkey`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ value: testData })
+                });
+                const saveText = await saveRes.text();
+                output.textContent += `POST Response (${saveRes.status}): ${saveText}\n\n`;
+            } catch (err) {
+                output.textContent += `POST Error: ${err.message}\n\n`;
+            }
+            
+            // Test GET (retrieve)
+            try {
+                output.textContent += '2. Testing GET from /api/kv/...\n';
+                const getRes = await fetch(`/api/kv/${userId}/testkey`);
+                const getText = await getRes.text();
+                output.textContent += `GET Response (${getRes.status}): ${getText}\n\n`;
+            } catch (err) {
+                output.textContent += `GET Error: ${err.message}\n\n`;
+            }
+            
+            // Test if API routes are accessible
+            try {
+                output.textContent += '3. Testing if vercel.json rewrites are working...\n';
+                const testRes = await fetch('/api/test', { method: 'GET' });
+                const testText = await testRes.text();
+                output.textContent += `Test endpoint response (${testRes.status}): ${testText.substring(0, 200)}\n\n`;
+                
+                if (testText.includes('<!DOCTYPE') || testText.includes('<html')) {
+                    output.textContent += '❌ ERROR: API routes are returning HTML instead of JSON!\n';
+                    output.textContent += 'The vercel.json rewrite rules are not working properly.\n';
+                }
+            } catch (err) {
+                output.textContent += `Test Error: ${err.message}\n\n`;
+            }
+        }
+    </script>
+</body>
+</html>
