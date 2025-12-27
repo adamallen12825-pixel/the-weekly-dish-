@@ -94,7 +94,9 @@ function MealPlan({ user, profile: profileProp }) {
     };
     
     loadAllData();
-  }, [user, profileProp]);
+    // Using user?.id instead of user to prevent re-running when Clerk's user object reference changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   const toggleFavorite = (mealName) => {
     let newFavorites = [...favorites];
@@ -294,10 +296,17 @@ function MealPlan({ user, profile: profileProp }) {
           console.log('Pantry items remaining:', pantryItems.length);
 
           // Save updated pantry and clear cache to ensure Pantry component sees fresh data
-          await saveUserData('pantry', pantryItems);
+          console.log('Saving pantry with', pantryItems.length, 'items');
+          if (!user || !user.id) {
+            console.error('ERROR: No user ID available for pantry save!');
+            throw new Error('User not available');
+          }
+          await kvService.set(user.id, 'pantry', pantryItems);
           // Also clear the kvService cache for pantry to force reload
           kvService.cache.delete(`${user.id}:pantry`);
-          console.log('Pantry saved successfully');
+          // Also update localStorage directly as backup
+          localStorage.setItem(`${user.id}_pantry`, JSON.stringify(pantryItems));
+          console.log('Pantry saved successfully to cloud and localStorage');
 
           // Show success message
           if (removedCount > 0) {
@@ -735,17 +744,7 @@ function MealPlan({ user, profile: profileProp }) {
     }
   };
 
-  useEffect(() => {
-    const loadSavedData = async () => {
-      if (!user) return;
-      // Load saved meal plan
-      const savedPlan = await loadUserData('currentMealPlan');
-      const savedList = await loadUserData('currentShoppingList');
-      if (savedPlan) setMealPlan(savedPlan);
-      if (savedList) setShoppingList(savedList);
-    };
-    loadSavedData();
-  }, [user]);
+  // Removed duplicate useEffect - data is already loaded in the first useEffect
 
   return (
     <div className="meal-plan-container">
