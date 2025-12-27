@@ -266,25 +266,26 @@ function MealPlan({ user, profile: profileProp }) {
                 const normalizedPantryUnit = normalizeUnit(pantryQty.unit || 'count');
                 const normalizedRecipeUnit = normalizeUnit(recipeQty.unit || 'count');
 
-                // Only subtract if units match or we can reasonably compare them
-                if (normalizedPantryUnit === normalizedRecipeUnit) {
-                  const newQuantity = pantryQty.quantity - recipeQty.quantity;
+                // Subtract quantities - be smart about unit matching
+                let amountToSubtract = recipeQty.quantity;
 
-                  if (newQuantity <= 0) {
-                    // Remove item completely if we used it all
-                    console.log(`   ❌ Removing entire item (used ${recipeQty.quantity}, had ${pantryQty.quantity})`);
-                    pantryItems.splice(pantryIndex, 1);
-                    removedCount++;
-                  } else {
-                    // Update quantity
-                    pantryItems[pantryIndex].quantity = `${newQuantity} ${pantryQty.unit}`;
-                    console.log(`   ✏️ Updated quantity to: ${newQuantity} ${pantryQty.unit}`);
-                    removedCount++;
-                  }
-                } else {
-                  // Units don't match - just remove the item to be safe
-                  console.log(`   ⚠️ Units don't match (${normalizedPantryUnit} vs ${normalizedRecipeUnit}), removing item`);
+                // If units don't match, just subtract 1 (assume 1 serving used)
+                if (normalizedPantryUnit !== normalizedRecipeUnit) {
+                  console.log(`   ⚠️ Units don't match (${normalizedPantryUnit} vs ${normalizedRecipeUnit}), subtracting 1 instead`);
+                  amountToSubtract = 1;
+                }
+
+                const newQuantity = pantryQty.quantity - amountToSubtract;
+
+                if (newQuantity <= 0) {
+                  // Remove item completely if we used it all
+                  console.log(`   ❌ Removing entire item (used ${amountToSubtract}, had ${pantryQty.quantity})`);
                   pantryItems.splice(pantryIndex, 1);
+                  removedCount++;
+                } else {
+                  // Update quantity - keep the pantry's original unit
+                  pantryItems[pantryIndex].quantity = `${newQuantity} ${pantryQty.unit}`;
+                  console.log(`   ✏️ Updated quantity to: ${newQuantity} ${pantryQty.unit}`);
                   removedCount++;
                 }
               } else {
