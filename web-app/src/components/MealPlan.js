@@ -17,6 +17,7 @@ function MealPlan({ user, profile: profileProp }) {
   const [shareLink, setShareLink] = useState('');
   const [showShareModal, setShowShareModal] = useState(false);
   const [profile, setProfile] = useState(profileProp);
+  const [cookingHistory, setCookingHistory] = useState([]);
 
   // Helper function to save data to Blob storage
   const saveUserData = async (key, value) => {
@@ -62,17 +63,20 @@ function MealPlan({ user, profile: profileProp }) {
         savedDislikes,
         history,
         savedMealPlan,
-        savedShoppingList
+        savedShoppingList,
+        savedCookingHistory
       ] = await Promise.all([
         loadUserData('recipeFavorites'),
         loadUserData('recipeDislikes'),
         loadUserData('mealPlanHistory'),
         loadUserData('currentMealPlan'),
-        loadUserData('currentShoppingList')
+        loadUserData('currentShoppingList'),
+        loadUserData('cookingHistory')
       ]);
-      
+
       setFavorites(savedFavorites || []);
       setDislikes(savedDislikes || []);
+      setCookingHistory(savedCookingHistory || []);
       
       if (history) {
         setMealPlanHistory(history);
@@ -282,13 +286,6 @@ function MealPlan({ user, profile: profileProp }) {
           await saveUserData('pantry', pantryItems);
           console.log('Pantry saved successfully');
 
-          alert(`✅ Marked "${meal.name}" as cooked! Removed ${removedCount} ingredient(s) from pantry. Refreshing page...`);
-
-          // Reload the page to show updated pantry
-          setTimeout(() => {
-            window.location.reload();
-          }, 1500);
-
         } else {
           // If we can't get recipe details, just mark as cooked without pantry update
           alert(`✅ Marked "${meal.name}" as cooked! (Recipe details not available to update pantry)`);
@@ -299,14 +296,17 @@ function MealPlan({ user, profile: profileProp }) {
       }
 
       // Track cooking history
-      const cookingHistory = await loadUserData('cookingHistory') || [];
-      cookingHistory.push({
+      const existingHistory = await loadUserData('cookingHistory') || [];
+      const newHistoryEntry = {
         meal: meal.name,
         date: new Date().toISOString(),
         mealType: meal.mealType,
+        day: meal.day,
         ingredientsRemoved: removedCount
-      });
-      await saveUserData('cookingHistory', cookingHistory);
+      };
+      const updatedHistory = [...existingHistory, newHistoryEntry];
+      await saveUserData('cookingHistory', updatedHistory);
+      setCookingHistory(updatedHistory);
 
     } catch (error) {
       console.error('Error marking meal as cooked:', error);
@@ -834,6 +834,7 @@ function MealPlan({ user, profile: profileProp }) {
                 dislikes={dislikes}
                 replacing={replacing}
                 shoppingList={shoppingList}
+                cookingHistory={cookingHistory}
               />
             </div>
           )}

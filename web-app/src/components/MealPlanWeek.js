@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
 
-function MealPlanWeek({ 
-  weekPlan, 
-  weekLabel, 
-  isCurrentWeek, 
-  onReplaceMeal, 
-  onCopyMeal, 
+function MealPlanWeek({
+  weekPlan,
+  weekLabel,
+  isCurrentWeek,
+  onReplaceMeal,
+  onCopyMeal,
   onReuseWeek,
   onToggleFavorite,
   onToggleDislike,
@@ -14,8 +14,17 @@ function MealPlanWeek({
   favorites = [],
   dislikes = [],
   replacing = {},
-  shoppingList = null
+  shoppingList = null,
+  cookingHistory = []
 }) {
+  // Helper to check if a meal has been cooked
+  const isMealCooked = (mealName, day, mealType) => {
+    return cookingHistory.some(entry =>
+      entry.meal === mealName &&
+      entry.day === day &&
+      entry.mealType === mealType
+    );
+  };
   const [customMealInputs, setCustomMealInputs] = useState({});
   const [showCustomInput, setShowCustomInput] = useState({});
   if (!weekPlan) return null;
@@ -59,12 +68,43 @@ function MealPlanWeek({
               const isReplacing = replacing[`${dayIndex}-${mealType}`];
               const isGeneratingCustom = replacing[`${dayIndex}-${mealType}`] && showCustomInput[`${dayIndex}-${mealType}`];
               const meal = day.meals ? day.meals[mealType] : null;
-              
+
               // Skip rendering if meal doesn't exist
               if (!meal) return null;
-              
+
+              const isCooked = isMealCooked(meal.name, day.day, mealType);
+
               return (
-                <div key={mealType} className="meal-item">
+                <div key={mealType} className="meal-item" style={{
+                  position: 'relative',
+                  ...(isCooked ? { opacity: 0.5 } : {})
+                }}>
+                  {isCooked && (
+                    <div style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      backgroundColor: 'rgba(0, 0, 0, 0.3)',
+                      display: 'flex',
+                      justifyContent: 'center',
+                      alignItems: 'center',
+                      zIndex: 10,
+                      borderRadius: '8px',
+                      pointerEvents: 'none'
+                    }}>
+                      <span style={{
+                        color: 'white',
+                        fontSize: '24px',
+                        fontWeight: 'bold',
+                        textShadow: '2px 2px 4px rgba(0,0,0,0.5)',
+                        transform: 'rotate(-15deg)'
+                      }}>
+                        COOKED
+                      </span>
+                    </div>
+                  )}
                   <div className="meal-header">
                     <span className="meal-type">{mealType}</span>
                     {isCurrentWeek && !shoppingList ? (
@@ -205,11 +245,13 @@ function MealPlanWeek({
                         👎
                       </button>
                       <button
-                        onClick={() => onCookedMeal({...meal, mealType})}
+                        onClick={() => onCookedMeal({...meal, mealType, day: day.day})}
                         className="cooked-btn"
                         title="I cooked this"
+                        disabled={isCooked}
+                        style={isCooked ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                       >
-                        🍳 Cooked
+                        {isCooked ? '✓ Cooked' : '🍳 Cooked'}
                       </button>
                     </div>
                   )}
