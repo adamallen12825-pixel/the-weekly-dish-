@@ -106,7 +106,8 @@ module.exports = async (req, res) => {
           const blob = await put(blobPath, JSON.stringify(value), {
             access: 'public',
             contentType: 'application/json',
-            addRandomSuffix: false
+            addRandomSuffix: false,
+            allowOverwrite: true
           });
           
           console.log(`[POST] Successfully saved ${blobPath}`);

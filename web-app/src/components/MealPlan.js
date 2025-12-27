@@ -162,8 +162,10 @@ function MealPlan({ user, profile: profileProp }) {
 
           // Helper function to parse quantity and unit from a string
           const parseQuantity = (str) => {
+            // Convert to string if needed (pantry quantity might be a number)
+            const strValue = String(str);
             // Match patterns like "2 lbs", "1.5 lb", "3 pounds", etc.
-            const match = str.match(/(\d+(?:\.\d+)?)\s*(lbs?|pounds?|oz|ounces?|cups?|tbsp|tsp|g|grams?|kg|kilograms?|ml|liters?|l|gallons?|quarts?|pints?|packages?|cans?|boxes?|bunches?|heads?|cloves?|stalks?|pieces?|slices?|dozen|count)?/i);
+            const match = strValue.match(/(\d+(?:\.\d+)?)\s*(lbs?|pounds?|oz|ounces?|cups?|tbsp|tsp|g|grams?|kg|kilograms?|ml|liters?|l|gallons?|quarts?|pints?|packages?|cans?|boxes?|bunches?|heads?|cloves?|stalks?|pieces?|slices?|dozen|count)?/i);
 
             if (match) {
               const quantity = parseFloat(match[1]);

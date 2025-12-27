@@ -230,7 +230,8 @@ module.exports = async (req, res) => {
           // Now save the new blob
           const blob = await put(blobPath, dataString, {
             access: 'public',
-            contentType: 'application/json'
+            contentType: 'application/json',
+            allowOverwrite: true
           });
           
           console.log(`[POST] Successfully saved ${blobPath} (${dataSizeKB.toFixed(2)} KB)`);
