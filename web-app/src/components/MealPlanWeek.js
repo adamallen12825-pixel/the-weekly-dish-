@@ -14,7 +14,7 @@ function MealPlanWeek({
   favorites = [],
   dislikes = [],
   replacing = {},
-  shoppingList = null,
+  mealPlanAccepted = false,
   cookingHistory = []
 }) {
   // Helper to check if a meal has been cooked
@@ -107,7 +107,7 @@ function MealPlanWeek({
                   )}
                   <div className="meal-header">
                     <span className="meal-type">{mealType}</span>
-                    {isCurrentWeek && !shoppingList ? (
+                    {isCurrentWeek && !mealPlanAccepted ? (
                       <div style={{ display: 'flex', gap: '5px' }}>
                         <button
                           onClick={() => onReplaceMeal(dayIndex, mealType)}
@@ -156,7 +156,7 @@ function MealPlanWeek({
                     )}
                   </div>
                   
-                  {showCustomInput[`${dayIndex}-${mealType}`] && !shoppingList && (
+                  {showCustomInput[`${dayIndex}-${mealType}`] && !mealPlanAccepted && (
                     <div style={{ marginTop: '10px', marginBottom: '10px' }}>
                       <input
                         type="text"
@@ -287,13 +287,6 @@ function MealPlanWeek({
         ))}
       </div>
 
-      {isCurrentWeek && shoppingList && (
-        <div className="shopping-list-preview">
-          <h3>Shopping List Generated</h3>
-          <p>Total: ${shoppingList.totalCost?.toFixed(2)}</p>
-          <p>View the Shopping List tab for details</p>
-        </div>
-      )}
     </div>
   );
 }

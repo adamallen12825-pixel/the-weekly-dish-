@@ -18,6 +18,7 @@ function MealPlan({ user, profile: profileProp }) {
   const [showShareModal, setShowShareModal] = useState(false);
   const [profile, setProfile] = useState(profileProp);
   const [cookingHistory, setCookingHistory] = useState([]);
+  const [mealPlanAccepted, setMealPlanAccepted] = useState(false);
 
   // Helper function to save data to Blob storage
   const saveUserData = async (key, value) => {
@@ -64,30 +65,33 @@ function MealPlan({ user, profile: profileProp }) {
         history,
         savedMealPlan,
         savedShoppingList,
-        savedCookingHistory
+        savedCookingHistory,
+        savedMealPlanAccepted
       ] = await Promise.all([
         loadUserData('recipeFavorites'),
         loadUserData('recipeDislikes'),
         loadUserData('mealPlanHistory'),
         loadUserData('currentMealPlan'),
         loadUserData('currentShoppingList'),
-        loadUserData('cookingHistory')
+        loadUserData('cookingHistory'),
+        loadUserData('mealPlanAccepted')
       ]);
 
       setFavorites(savedFavorites || []);
       setDislikes(savedDislikes || []);
       setCookingHistory(savedCookingHistory || []);
-      
+      setMealPlanAccepted(savedMealPlanAccepted || false);
+
       if (history) {
         setMealPlanHistory(history);
       } else {
         setMealPlanHistory([]);
       }
-      
+
       if (savedMealPlan) {
         setMealPlan(savedMealPlan);
       }
-      
+
       if (savedShoppingList) {
         setShoppingList(savedShoppingList);
       }
@@ -367,11 +371,13 @@ function MealPlan({ user, profile: profileProp }) {
       }
       setMealPlan(plan);
       setShoppingList(null);
-      
+      setMealPlanAccepted(false);
+
       // Save the new meal plan to cloud immediately
       await saveUserData('currentMealPlan', plan);
-      // Also clear the shopping list in cloud since we have a new meal plan
+      // Also clear the shopping list and accepted status since we have a new meal plan
       await saveUserData('currentShoppingList', null);
+      await saveUserData('mealPlanAccepted', false);
     } catch (error) {
       alert(`Failed to generate meal plan: ${error.message}`);
     } finally {
@@ -395,6 +401,10 @@ function MealPlan({ user, profile: profileProp }) {
       // Save to localStorage (Clerk has 8KB limit)
       await saveUserData('currentMealPlan', mealPlan);
       await saveUserData('currentShoppingList', list);
+
+      // Mark meal plan as accepted (persists even after shopping list is cleared)
+      setMealPlanAccepted(true);
+      await saveUserData('mealPlanAccepted', true);
 
       // Add to history with timestamp
       const historyEntry = {
@@ -828,7 +838,7 @@ function MealPlan({ user, profile: profileProp }) {
                   >
                     🔗 Share Plan
                   </button>
-                  {!shoppingList && (
+                  {!mealPlanAccepted && (
                     <button
                       onClick={handleAcceptMealPlan}
                       disabled={loading}
@@ -852,7 +862,7 @@ function MealPlan({ user, profile: profileProp }) {
                 favorites={favorites}
                 dislikes={dislikes}
                 replacing={replacing}
-                shoppingList={shoppingList}
+                mealPlanAccepted={mealPlanAccepted}
                 cookingHistory={cookingHistory}
               />
             </div>
@@ -991,7 +1001,7 @@ function MealPlan({ user, profile: profileProp }) {
           
           {currentWeekIndex === 0 && mealPlan && (
             <div className="plan-actions">
-              {!shoppingList && (
+              {!mealPlanAccepted && (
                 <button
                   onClick={handleAcceptMealPlan}
                   disabled={loading}
