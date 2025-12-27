@@ -733,7 +733,11 @@ export const generateShoppingList = async (mealPlan, pantryItems, profile) => {
     Example: If you have 3 items at $5.99, $3.49, and $12.98, totalCost = 22.46`;
 
   const response = await callGPT([
-    { role: 'system', content: `You are a JSON API that creates shopping lists. Return ONLY valid JSON - no explanations or additional text.
+    { role: 'system', content: `You are a JSON-only shopping list API. OUTPUT RULES:
+    - Output ONLY valid JSON. No markdown. No explanations. No apologies.
+    - Start your response with { and end with }
+    - NEVER say "I'm sorry" or ask questions. Just generate the list.
+    - If something seems wrong, make your best guess and proceed.
 
     You are a Walmart shopping list expert for ZIP ${safeProfile.zipCode || '72762'}.
 
@@ -1041,18 +1045,19 @@ export const generateCustomMeal = async (mealName, profile, mealType) => {
 
   try {
     const response = await callGPT([
-      { role: 'system', content: `You are a meal planning expert specializing in ${mealType} meals.
+      { role: 'system', content: `You are a JSON-only meal replacement API. OUTPUT RULES:
+      - Output ONLY valid JSON. No markdown. No explanations. No apologies.
+      - Start your response with { and end with }
+      - NEVER say "I'm sorry" or ask questions. Just generate the meal.
+      - If something seems wrong, make your best guess and proceed.
+
+      You are a meal planning expert specializing in ${mealType} meals.
 
       CRITICAL RULES:
       1. The meal name MUST be exactly "${mealName}" as the user requested
       2. Follow ${safeProfile.dietType} diet requirements STRICTLY
       3. Use realistic Walmart prices for budget calculations
-      4. Ensure cooking time matches the difficulty level
-      5. ${mealType === 'breakfast' ? 'Ensure it\'s appropriate for morning meals' : ''}
-      6. ${mealType === 'lunch' ? 'Ensure it\'s appropriate for midday meals' : ''}
-      7. ${mealType === 'dinner' ? 'Ensure it\'s appropriate for evening meals' : ''}
-
-      Return ONLY valid JSON. No explanatory text.` },
+      4. Ensure cooking time matches the difficulty level` },
       { role: 'user', content: prompt }
     ], 60000); // 60 second timeout
 
@@ -1210,18 +1215,19 @@ export const replaceMeal = async (currentMeal, profile, pantryItems, mealType) =
 
   try {
     const response = await callGPT([
-      { role: 'system', content: `You are a meal planning expert specializing in ${mealType} meals.
+      { role: 'system', content: `You are a JSON-only meal replacement API. OUTPUT RULES:
+      - Output ONLY valid JSON. No markdown. No explanations. No apologies.
+      - Start your response with { and end with }
+      - NEVER say "I'm sorry" or ask questions. Just generate the meal.
+      - If something seems wrong, make your best guess and proceed.
+
+      You are a meal planning expert specializing in ${mealType} meals.
 
       CRITICAL RULES:
       1. Generate a DIFFERENT meal from "${currentMeal.name}"
       2. Follow ${safeProfile.dietType} diet requirements STRICTLY
       3. Use realistic Walmart prices for budget calculations
-      4. Ensure cooking time matches the difficulty level
-      5. ${mealType === 'breakfast' ? 'Create quick, morning-appropriate meals' : ''}
-      6. ${mealType === 'lunch' ? 'Create portable or quick lunch options' : ''}
-      7. ${mealType === 'dinner' ? 'Create satisfying dinner meals' : ''}
-
-      Return ONLY valid JSON. No explanatory text.` },
+      4. Ensure cooking time matches the difficulty level` },
       { role: 'user', content: prompt }
     ], 60000); // 60 second timeout
 
@@ -1451,9 +1457,15 @@ export const getDetailedRecipe = async (meal, profile) => {
       }
     }`;
 
-  const systemPrompt = isMealPrep ?
+  const systemPrompt = `You are a JSON-only recipe API. OUTPUT RULES:
+    - Output ONLY valid JSON. No markdown. No explanations. No apologies.
+    - Start your response with { and end with }
+    - NEVER say "I'm sorry" or ask questions. Just generate the recipe.
+    - If something seems wrong, make your best guess and proceed.
+
+    ${isMealPrep ?
     'You are a professional chef specializing in meal prep. You create recipes that can be batch cooked and stored for an entire week while maintaining quality and freshness. Always multiply ALL ingredients by 7 for weekly meal prep, not just adjust servings.' :
-    'You are a professional chef and recipe developer.';
+    'You are a professional chef and recipe developer.'}`;
 
   try {
     const response = await callGPT([
@@ -1551,7 +1563,13 @@ export const generateQuickMeal = async (pantryItems, profile) => {
     }`;
 
   const response = await callGPT([
-    { role: 'system', content: 'You are a creative chef who makes delicious meals from available ingredients.' },
+    { role: 'system', content: `You are a JSON-only quick meal API. OUTPUT RULES:
+    - Output ONLY valid JSON. No markdown. No explanations. No apologies.
+    - Start your response with { and end with }
+    - NEVER say "I'm sorry" or ask questions. Just generate the meal.
+    - If something seems wrong, make your best guess and proceed.
+
+    You are a creative chef who makes delicious meals from available ingredients.` },
     { role: 'user', content: prompt }
   ]);
 
@@ -1664,7 +1682,13 @@ export const processImages = async (images) => {
           messages: [
             {
               role: 'system',
-              content: 'You are a helpful assistant that identifies pantry items from images. Always respond with a valid JSON array only, no other text.'
+              content: `You are a JSON-only pantry scanner API. OUTPUT RULES:
+              - Output ONLY valid JSON array. No markdown. No explanations. No apologies.
+              - Start your response with [ and end with ]
+              - NEVER say "I'm sorry" or ask questions. Just identify the items.
+              - If you can't identify something, skip it and continue.
+
+              You identify pantry items from images.`
             },
             {
               role: 'user',
