@@ -334,7 +334,13 @@ export const generateMealPlan = async (profile, pantryItems) => {
     IMPORTANT: The days array MUST have 7 elements, not 1, not 2, but EXACTLY 7 days!`;
 
   const response = await callGPT([
-    { role: 'system', content: `You are a Walmart-savvy meal planning expert. You MUST strictly follow the user's profile requirements.
+    { role: 'system', content: `You are a JSON-only meal planning API. OUTPUT RULES:
+    - Output ONLY valid JSON. No markdown. No explanations. No apologies.
+    - Start your response with { and end with }
+    - NEVER say "I'm sorry" or ask questions. Just generate the meal plan.
+    - If something seems wrong, make your best guess and proceed.
+
+    You are a Walmart-savvy meal planning expert. You MUST strictly follow the user's profile requirements.
 
     CRITICAL REQUIREMENTS (MUST FOLLOW EXACTLY)
     1. Generate EXACTLY 7 DAYS - Monday through Sunday, NO EXCEPTIONS
