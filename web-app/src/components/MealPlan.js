@@ -199,92 +199,112 @@ function MealPlan({ user, profile: profileProp }) {
           };
 
           // Match and update quantities in pantry
-          recipe.ingredients.forEach(ingredient => {
-            const ingredientStr = typeof ingredient === 'string' ? ingredient : (ingredient.name || '');
+          for (const ingredient of recipe.ingredients) {
+            try {
+              const ingredientStr = typeof ingredient === 'string' ? ingredient : (ingredient.name || String(ingredient) || '');
 
-            // Parse quantity from recipe ingredient
-            const recipeQty = parseQuantity(ingredientStr);
+              if (!ingredientStr) continue;
 
-            // Extract ingredient name (remove quantities, measurements, and brand names)
-            let ingredientName = ingredientStr
-              .replace(/^\d+(\.\d+)?\s*(lbs?|oz|cups?|tbsp|tsp|g|kg|ml|l|gallons?|quarts?|pints?|packages?|cans?|boxes?|bunches?|heads?|cloves?|stalks?|pieces?|slices?|dozen|count)?\s*/i, '')
-              .replace(/^(Great Value|Tyson|Hormel|All Natural|Fresh|Organic|Generic)\s+/i, '')
-              .replace(/\([^)]*\)/g, '')
-              .trim();
+              // Parse quantity from recipe ingredient
+              const recipeQty = parseQuantity(ingredientStr);
 
-            const ingredientWords = ingredientName.toLowerCase().split(/\s+/).filter(word => word.length > 2);
+              // Extract ingredient name (remove quantities, measurements, and brand names)
+              let ingredientName = ingredientStr
+                .replace(/^\d+(\.\d+)?\s*(lbs?|oz|cups?|tbsp|tsp|g|kg|ml|l|gallons?|quarts?|pints?|packages?|cans?|boxes?|bunches?|heads?|cloves?|stalks?|pieces?|slices?|dozen|count)?\s*/i, '')
+                .replace(/^(Great Value|Tyson|Hormel|All Natural|Fresh|Organic|Generic)\s+/i, '')
+                .replace(/\([^)]*\)/g, '')
+                .trim();
 
-            console.log(`\n🔍 Recipe needs: ${recipeQty.quantity} ${recipeQty.unit} ${ingredientName}`);
+              if (!ingredientName) continue;
 
-            // Find matching pantry item
-            const pantryIndex = pantryItems.findIndex(item => {
-              const pantryName = item.name.toLowerCase();
-              const pantryWords = pantryName.split(/\s+/).filter(word => word.length > 2);
+              const ingredientWords = ingredientName.toLowerCase().split(/\s+/).filter(word => word.length > 2);
 
-              // Check for exact substring match
-              if (pantryName.includes(ingredientName.toLowerCase()) ||
-                  ingredientName.toLowerCase().includes(pantryName)) {
-                return true;
-              }
+              console.log(`\n🔍 Recipe needs: ${recipeQty.quantity} ${recipeQty.unit} ${ingredientName}`);
 
-              // Check if any key words match
-              for (const ingredientWord of ingredientWords) {
-                for (const pantryWord of pantryWords) {
-                  if (ingredientWord === pantryWord ||
-                      ingredientWord.includes(pantryWord) ||
-                      pantryWord.includes(ingredientWord)) {
-                    return true;
+              // Find matching pantry item
+              const pantryIndex = pantryItems.findIndex(item => {
+                if (!item || !item.name) return false;
+                const pantryName = item.name.toLowerCase();
+                const pantryWords = pantryName.split(/\s+/).filter(word => word.length > 2);
+
+                // Check for exact substring match
+                if (pantryName.includes(ingredientName.toLowerCase()) ||
+                    ingredientName.toLowerCase().includes(pantryName)) {
+                  return true;
+                }
+
+                // Check if any key words match
+                for (const ingredientWord of ingredientWords) {
+                  for (const pantryWord of pantryWords) {
+                    if (ingredientWord === pantryWord ||
+                        ingredientWord.includes(pantryWord) ||
+                        pantryWord.includes(ingredientWord)) {
+                      return true;
+                    }
                   }
                 }
-              }
-              return false;
-            });
+                return false;
+              });
 
-            if (pantryIndex !== -1) {
-              const pantryItem = pantryItems[pantryIndex];
-              console.log(`✅ Found in pantry: ${pantryItem.name} (${pantryItem.quantity || 'no quantity'})`);
+              if (pantryIndex !== -1) {
+                const pantryItem = pantryItems[pantryIndex];
+                const pantryQtyStr = pantryItem.quantity != null ? String(pantryItem.quantity) : '1 count';
+                console.log(`✅ Found in pantry: ${pantryItem.name} (${pantryQtyStr})`);
 
-              // Parse pantry quantity
-              const pantryQty = parseQuantity(pantryItem.quantity || '1 count');
-              console.log(`   Pantry has: ${pantryQty.quantity} ${pantryQty.unit}`);
-              console.log(`   Recipe uses: ${recipeQty.quantity} ${recipeQty.unit}`);
+                // Parse pantry quantity
+                const pantryQty = parseQuantity(pantryQtyStr);
+                console.log(`   Pantry has: ${pantryQty.quantity} ${pantryQty.unit}`);
+                console.log(`   Recipe uses: ${recipeQty.quantity} ${recipeQty.unit}`);
 
-              // Normalize units for comparison
-              const normalizedPantryUnit = normalizeUnit(pantryQty.unit);
-              const normalizedRecipeUnit = normalizeUnit(recipeQty.unit);
+                // Normalize units for comparison
+                const normalizedPantryUnit = normalizeUnit(pantryQty.unit || 'count');
+                const normalizedRecipeUnit = normalizeUnit(recipeQty.unit || 'count');
 
-              // Only subtract if units match or we can reasonably compare them
-              if (normalizedPantryUnit === normalizedRecipeUnit) {
-                const newQuantity = pantryQty.quantity - recipeQty.quantity;
+                // Only subtract if units match or we can reasonably compare them
+                if (normalizedPantryUnit === normalizedRecipeUnit) {
+                  const newQuantity = pantryQty.quantity - recipeQty.quantity;
 
-                if (newQuantity <= 0) {
-                  // Remove item completely if we used it all
-                  console.log(`   ❌ Removing entire item (used ${recipeQty.quantity}, had ${pantryQty.quantity})`);
-                  pantryItems.splice(pantryIndex, 1);
-                  removedCount++;
+                  if (newQuantity <= 0) {
+                    // Remove item completely if we used it all
+                    console.log(`   ❌ Removing entire item (used ${recipeQty.quantity}, had ${pantryQty.quantity})`);
+                    pantryItems.splice(pantryIndex, 1);
+                    removedCount++;
+                  } else {
+                    // Update quantity
+                    pantryItems[pantryIndex].quantity = `${newQuantity} ${pantryQty.unit}`;
+                    console.log(`   ✏️ Updated quantity to: ${newQuantity} ${pantryQty.unit}`);
+                    removedCount++;
+                  }
                 } else {
-                  // Update quantity
-                  pantryItems[pantryIndex].quantity = `${newQuantity} ${pantryQty.unit}`;
-                  console.log(`   ✏️ Updated quantity to: ${newQuantity} ${pantryQty.unit}`);
+                  // Units don't match - just remove the item to be safe
+                  console.log(`   ⚠️ Units don't match (${normalizedPantryUnit} vs ${normalizedRecipeUnit}), removing item`);
+                  pantryItems.splice(pantryIndex, 1);
                   removedCount++;
                 }
               } else {
-                // Units don't match - just remove the item to be safe
-                console.log(`   ⚠️ Units don't match (${normalizedPantryUnit} vs ${normalizedRecipeUnit}), removing item`);
-                pantryItems.splice(pantryIndex, 1);
-                removedCount++;
+                console.log(`❌ No match found in pantry for: ${ingredientName}`);
               }
-            } else {
-              console.log(`❌ No match found in pantry for: ${ingredientName}`);
+            } catch (ingredientError) {
+              console.error(`Error processing ingredient:`, ingredient, ingredientError);
+              // Continue with next ingredient instead of failing entirely
             }
-          });
+          }
 
           console.log('Removed', removedCount, 'items from pantry');
           console.log('Pantry items remaining:', pantryItems.length);
 
-          // Save updated pantry
+          // Save updated pantry and clear cache to ensure Pantry component sees fresh data
           await saveUserData('pantry', pantryItems);
+          // Also clear the kvService cache for pantry to force reload
+          kvService.cache.delete(`${user.id}:pantry`);
           console.log('Pantry saved successfully');
+
+          // Show success message
+          if (removedCount > 0) {
+            alert(`Marked "${meal.name}" as cooked!\n\n${removedCount} ingredient(s) removed/updated from your pantry.`);
+          } else {
+            alert(`Marked "${meal.name}" as cooked!\n\nNo matching pantry items were found to remove.`);
+          }
 
         } else {
           // If we can't get recipe details, just mark as cooked without pantry update
