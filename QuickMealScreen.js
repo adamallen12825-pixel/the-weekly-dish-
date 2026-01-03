@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import apiService from './apiService';
+import UserCounter from './UserCounter';
 
 export default function QuickMealScreen({ onBack, userProfile }) {
   const [pantryItems, setPantryItems] = useState([]);
@@ -56,6 +57,7 @@ export default function QuickMealScreen({ onBack, userProfile }) {
 
   return (
     <View style={styles.container}>
+      <UserCounter />
       <TouchableOpacity onPress={onBack}>
         <Text style={styles.backButton}>← Back</Text>
       </TouchableOpacity>

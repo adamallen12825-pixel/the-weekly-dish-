@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import { useSignIn, useSignUp, useAuth } from '@clerk/clerk-expo';
 import * as WebBrowser from 'expo-web-browser';
+import UserCounter from './UserCounter';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -118,6 +119,7 @@ export default function AuthScreen({ setIsAuthenticated }) {
   if (loading) {
     return (
       <View style={styles.container}>
+        <UserCounter />
         <ActivityIndicator size="large" color="#4CAF50" />
         <Text style={styles.loadingText}>Authenticating...</Text>
       </View>
@@ -126,6 +128,7 @@ export default function AuthScreen({ setIsAuthenticated }) {
 
   return (
     <View style={styles.container}>
+      <UserCounter />
       <View style={styles.logoContainer}>
         <Text style={styles.logo}>The Weekly Dish</Text>
         <Text style={styles.tagline}>Smart Meal Planning Made Easy</Text>

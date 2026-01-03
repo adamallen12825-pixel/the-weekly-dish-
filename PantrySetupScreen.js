@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import PantryScreen from './PantryScreen';
+import UserCounter from './UserCounter';
 
 const STORAGE_KEYS = {
   PANTRY_SETUP_COMPLETE: '@weekly_dish_pantry_setup_complete',
@@ -57,7 +58,9 @@ export default function PantrySetupScreen({ onComplete, onSkip }) {
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
+    <View style={{flex: 1}}>
+      <UserCounter />
+      <ScrollView contentContainerStyle={styles.container}>
       <Image source={require('./assets/logo.png')} style={styles.logo} />
       
       <Text style={styles.title}>Set Up Your Pantry</Text>
@@ -125,6 +128,7 @@ export default function PantrySetupScreen({ onComplete, onSkip }) {
         You can always update your pantry later from the main menu
       </Text>
     </ScrollView>
+    </View>
   );
 }
 

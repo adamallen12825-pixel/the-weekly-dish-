@@ -17,6 +17,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import apiService from './apiService';
+import UserCounter from './UserCounter';
 
 const STORAGE_KEYS = {
   PANTRY_ITEMS: '@weekly_dish_pantry',
@@ -280,6 +281,7 @@ export default function PantryScreen({ onBack, isSetupMode = false, onFinishSetu
   if (showCamera) {
     return (
       <View style={styles.container}>
+        <UserCounter />
         <CameraView
           style={styles.camera}
           ref={cameraRef}
@@ -348,6 +350,7 @@ export default function PantryScreen({ onBack, isSetupMode = false, onFinishSetu
   if (showScanner) {
     return (
       <View style={styles.container}>
+        <UserCounter />
         <CameraView
           style={styles.scanner}
           onBarcodeScanned={handleBarCodeScanned}
@@ -372,10 +375,11 @@ export default function PantryScreen({ onBack, isSetupMode = false, onFinishSetu
 
   return (
     <View style={styles.container}>
+      <UserCounter />
       <TouchableOpacity onPress={onBack}>
         <Text style={styles.backButton}>← Back</Text>
       </TouchableOpacity>
-      
+
       <Text style={styles.title}>{isSetupMode ? 'Pantry Setup' : 'My Pantry'}</Text>
       <Text style={styles.subtitle}>{pantryItems.length} items tracked</Text>
       

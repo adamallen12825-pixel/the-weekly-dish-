@@ -1,6 +1,6 @@
 const express = require('express');
 const cors = require('cors');
-const { ClerkExpressRequireAuth } = require('@clerk/clerk-sdk-node');
+const { ClerkExpressRequireAuth, clerkClient } = require('@clerk/clerk-sdk-node');
 const fetch = require('node-fetch');
 
 const app = express();
@@ -29,6 +29,18 @@ try {
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'The Weekly Dish API is running' });
+});
+
+// Get total user count
+app.get('/api/users/count', async (req, res) => {
+  try {
+    // Get total user count from Clerk
+    const count = await clerkClient.users.getCount();
+    res.json({ count });
+  } catch (error) {
+    console.error('Error getting user count:', error);
+    res.status(500).json({ error: error.message, count: 0 });
+  }
 });
 
 // In-memory storage fallback (for development/testing)

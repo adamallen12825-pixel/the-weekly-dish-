@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import apiService from './apiService';
+import UserCounter from './UserCounter';
 
 export default function RecipesScreen({ onBack }) {
   const [currentMealPlan, setCurrentMealPlan] = useState(null);
@@ -319,10 +320,11 @@ export default function RecipesScreen({ onBack }) {
 
   return (
     <View style={styles.container}>
+      <UserCounter />
       <TouchableOpacity onPress={onBack}>
         <Text style={styles.backButton}>← Back</Text>
       </TouchableOpacity>
-      
+
       <Text style={styles.title}>Recipes</Text>
       
       {selectedRecipe ? renderRecipeDetails() : renderRecipeList()}

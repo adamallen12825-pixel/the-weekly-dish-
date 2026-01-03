@@ -12,6 +12,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import apiService from './apiService';
 import DebugScreen, { DebugLogger } from './DebugScreen';
+import UserCounter from './UserCounter';
 
 const STORAGE_KEYS = {
   USER_PROFILE: '@weekly_dish_user_profile',
@@ -610,6 +611,7 @@ export default function MealPlanScreen({ onBack }) {
 
   return (
     <View style={styles.container}>
+      <UserCounter />
       <DebugScreen />
       <TouchableOpacity onPress={onBack}>
         <Text style={styles.backButton}>← Back</Text>

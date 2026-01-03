@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import UserCounter from './UserCounter';
 
 export default function ShoppingListScreen({ onBack }) {
   const [shoppingList, setShoppingList] = useState(null);
@@ -62,6 +63,7 @@ export default function ShoppingListScreen({ onBack }) {
   if (loading) {
     return (
       <View style={styles.container}>
+        <UserCounter />
         <TouchableOpacity onPress={onBack}>
           <Text style={styles.backButton}>← Back</Text>
         </TouchableOpacity>
@@ -76,11 +78,12 @@ export default function ShoppingListScreen({ onBack }) {
   if (!shoppingList) {
     return (
       <View style={styles.container}>
+        <UserCounter />
         <TouchableOpacity onPress={onBack}>
           <Text style={styles.backButton}>← Back</Text>
         </TouchableOpacity>
         <Text style={styles.title}>Shopping List</Text>
-        
+
         <View style={styles.emptyState}>
           <Text style={styles.emptyText}>No shopping list yet</Text>
           <Text style={styles.emptySubtext}>
@@ -93,10 +96,11 @@ export default function ShoppingListScreen({ onBack }) {
 
   return (
     <View style={styles.container}>
+      <UserCounter />
       <TouchableOpacity onPress={onBack}>
         <Text style={styles.backButton}>← Back</Text>
       </TouchableOpacity>
-      
+
       <Text style={styles.title}>Shopping List</Text>
       
       <ScrollView style={styles.listContainer}>

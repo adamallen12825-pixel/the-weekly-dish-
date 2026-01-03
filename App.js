@@ -13,6 +13,7 @@ import ShoppingListScreen from './ShoppingListScreen';
 import QuickMealScreen from './QuickMealScreen';
 import { CustomNumberPicker, AgeInputGroup } from './CustomNumberPicker';
 import { API_URL, APP_SCHEME } from './config';
+import UserCounter from './UserCounter';
 
 const STORAGE_KEYS = {
   USER_PROFILE: '@weekly_dish_user_profile',
@@ -215,6 +216,7 @@ function MainApp() {
   if (isLoading) {
     return (
       <View style={styles.container}>
+        <UserCounter />
         <Image source={require('./assets/logo.png')} style={styles.logo} />
         <Text>Loading...</Text>
       </View>
@@ -230,6 +232,7 @@ function MainApp() {
   if (isAuthenticated && !hasSubscription && !isLoading) {
     return (
       <View style={styles.container}>
+        <UserCounter />
         <Image source={require('./assets/logo.png')} style={styles.logo} />
         <Text style={styles.title}>Welcome to The Weekly Dish!</Text>
         <Text style={styles.subtitle}>Start your 7-day free trial to access all features</Text>
@@ -263,7 +266,9 @@ function MainApp() {
     const snacks = ['Homemade Snacks', 'Store-Bought Snacks', 'Healthy Snacks', 'Desserts'];
 
     return (
-      <ScrollView contentContainerStyle={[styles.scrollContainer, {paddingBottom: 100}]}>
+      <View style={{flex: 1}}>
+        <UserCounter />
+        <ScrollView contentContainerStyle={[styles.scrollContainer, {paddingBottom: 100}]}>
         <Image source={require('./assets/logo.png')} style={styles.logo} />
         <Text style={styles.title}>Welcome to The Weekly Dish</Text>
         <Text style={styles.subtitle}>Let's set up your meal planning profile</Text>
@@ -473,9 +478,10 @@ function MainApp() {
         <TouchableOpacity style={styles.primaryButton} onPress={completeOnboarding}>
           <Text style={styles.buttonText}>Start Meal Planning</Text>
         </TouchableOpacity>
-        
+
         <StatusBar style="auto" />
       </ScrollView>
+      </View>
     );
   }
 
@@ -607,6 +613,7 @@ function MainApp() {
 
   return (
     <View style={styles.container}>
+      <UserCounter />
       {renderMainApp()}
       <StatusBar style="auto" />
     </View>
