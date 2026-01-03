@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { API_URL } from './config';
 
 const UserCounter = () => {
   const [userCount, setUserCount] = useState(null);
 
   const fetchUserCount = async () => {
     try {
-      const response = await fetch(`${API_URL}/users/count`);
+      // Use the web URL directly for the API call
+      const response = await fetch('https://theweekly-dish.com/api/users?action=count');
       const data = await response.json();
       if (data.count !== undefined) {
         setUserCount(data.count);
