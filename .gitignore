@@ -45,3 +45,6 @@ web-app/.env
 # Build output (never commit — bundles can bake in build-time env)
 web-app/build/
 build/
+
+# Local Claude Code settings (may contain command history)
+.claude/settings.local.json

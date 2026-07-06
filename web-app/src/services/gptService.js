@@ -200,6 +200,27 @@ export const generateMealPlan = async (profile, pantryItems) => {
   ].filter(f => f);
   
 
+  // Scale the strategy to how tight the budget actually is (dollars per person
+  // per day). A tight budget means cheap staples and repetition — that's the
+  // correct answer, not a failure.
+  const people = (safeProfile.adults || 1) + (safeProfile.kids || 0);
+  const perPersonPerDay = safeProfile.weeklyBudget / (people * 7);
+  let budgetStrategy;
+  if (perPersonPerDay < 4) {
+    budgetStrategy = `BUDGET LEVEL: VERY TIGHT (about $${perPersonPerDay.toFixed(2)} per person per day).
+This budget only works with cheap staples. Staying within budget matters more than variety — a plain, repetitive plan that fits the budget is the CORRECT answer; a varied plan that goes over budget is WRONG.
+- Build meals around: rice, dried beans and lentils, eggs, oats, potatoes, cabbage, carrots, onions, frozen vegetables, bananas, peanut butter, flour, and the cheapest proteins (chicken thighs or leg quarters, bulk ground beef, canned tuna).
+- Avoid: steak, salmon, fresh berries, nuts, large amounts of cheese, pre-packaged/convenience foods, and out-of-season produce.
+- Repeat meals across days and reuse the same core ingredients all week so one bag or package covers many meals (e.g. one large bag of rice, one bag of dried beans).`;
+  } else if (perPersonPerDay < 7) {
+    budgetStrategy = `BUDGET LEVEL: TIGHT (about $${perPersonPerDay.toFixed(2)} per person per day).
+Lean on affordable staples and cheaper proteins (chicken thighs, ground beef, eggs, beans, rice, pasta, potatoes, frozen vegetables). Reuse ingredients across meals to avoid waste. Some variety is fine, but staying under budget comes first.`;
+  } else {
+    budgetStrategy = `BUDGET LEVEL: COMFORTABLE (about $${perPersonPerDay.toFixed(2)} per person per day). There is room for variety and a range of proteins and fresh produce while staying under budget.`;
+  }
+  budgetStrategy += `
+Plan around what must be BOUGHT (whole packages), not just the portion eaten — buying a dozen eggs to use four still costs a full dozen. Keep the number of distinct ingredients small and reuse them across meals so the actual grocery total stays within $${safeProfile.weeklyBudget}.`;
+
   const prompt = `Generate a COMPLETE 7-day meal plan for ${safeProfile.adults} adults and ${safeProfile.kids} kids.
 
     MANDATORY: You MUST include ALL 7 DAYS:
@@ -265,6 +286,9 @@ export const generateMealPlan = async (profile, pantryItems) => {
 
     AFTER GENERATING, VERIFY: Sum of all estimatedCost MUST be under $${safeProfile.weeklyBudget}!
     If over budget, USE CHEAPER INGREDIENTS: ground beef not steak, chicken thighs not breasts, store brand not name brand!
+
+    ${budgetStrategy}
+
     Diet: ${safeProfile.dietType} ${safeProfile.customDiet ? `(${safeProfile.customDiet})` : ''} - STRICTLY FOLLOW THIS DIET
     
     🥛 DAIRY PREFERENCES (VIOLATING THESE IS TOTAL FAILURE):
@@ -510,7 +534,10 @@ export const generateMealPlan = async (profile, pantryItems) => {
     }
   }
 
-  // BUDGET VALIDATION - Calculate total cost and warn/adjust if over budget
+  // Budget check — report the HONEST total. We do NOT rewrite the per-meal
+  // numbers to fake budget compliance (that only hid the overage and made the
+  // shopping list a nasty surprise). Keeping meals within budget is handled by
+  // the budget-strategy instructions in the prompt, not by faking totals here.
   let totalCost = 0;
   for (const day of mealPlan.days) {
     for (const mealType of ['breakfast', 'lunch', 'dinner']) {
@@ -519,36 +546,7 @@ export const generateMealPlan = async (profile, pantryItems) => {
       }
     }
   }
-
-  console.log(`💰 BUDGET CHECK: Total meal plan cost = $${totalCost.toFixed(2)}, Budget = $${safeProfile.weeklyBudget}`);
-
-  if (totalCost > safeProfile.weeklyBudget) {
-    const overagePercent = ((totalCost - safeProfile.weeklyBudget) / safeProfile.weeklyBudget * 100).toFixed(1);
-    console.error(`⚠️ BUDGET EXCEEDED by $${(totalCost - safeProfile.weeklyBudget).toFixed(2)} (${overagePercent}% over)`);
-
-    // Scale down all meal costs proportionally to fit budget
-    const scaleFactor = (safeProfile.weeklyBudget * 0.95) / totalCost;
-    console.log(`📉 Scaling meal costs by ${(scaleFactor * 100).toFixed(1)}% to fit budget`);
-
-    for (const day of mealPlan.days) {
-      for (const mealType of ['breakfast', 'lunch', 'dinner']) {
-        if (day.meals[mealType] && day.meals[mealType].estimatedCost) {
-          day.meals[mealType].estimatedCost = parseFloat((day.meals[mealType].estimatedCost * scaleFactor).toFixed(2));
-        }
-      }
-    }
-
-    // Recalculate to verify
-    let newTotal = 0;
-    for (const day of mealPlan.days) {
-      for (const mealType of ['breakfast', 'lunch', 'dinner']) {
-        if (day.meals[mealType] && day.meals[mealType].estimatedCost) {
-          newTotal += day.meals[mealType].estimatedCost;
-        }
-      }
-    }
-    console.log(`✅ Adjusted total: $${newTotal.toFixed(2)}`);
-  }
+  console.log(`Budget check: estimated meal-plan cost = $${totalCost.toFixed(2)}, budget = $${safeProfile.weeklyBudget}`);
 
   return mealPlan;
 };
@@ -661,6 +659,8 @@ export const generateShoppingList = async (mealPlan, pantryItems, profile) => {
       ? '(STICK TO BUDGET: target 95-100% usage of the full budget)'
       : '(STAY UNDER BUDGET: can use less if appropriate, but never exceed)'}
     Household: ${safeProfile.adults} adults, ${safeProfile.kids} kids
+
+    STAYING IN BUDGET: For every item, pick the cheapest store brand (e.g. Great Value) and the most economical package size. The sum of all estimatedPrice values must come in at or under $${safeProfile.weeklyBudget}. Use real prices — never invent artificially low numbers. If the honest cost of the required ingredients genuinely exceeds the budget, choose the cheapest viable options and add a note in moneySavingTips explaining it; do NOT fake the prices to hit the number.
     
     🚨 CRITICAL DIETARY PREFERENCES - MUST FOLLOW EXACTLY! 🚨
     ${safeProfile.dairyPreferences?.milk ? `
