@@ -9,6 +9,7 @@
 
 const Anthropic = require('@anthropic-ai/sdk');
 const { applyCors, requireAuth } = require('./_lib/auth');
+const { createLogger, errFields } = require('./_lib/log');
 
 const MODEL = 'claude-sonnet-5';
 
@@ -64,10 +65,11 @@ function convertMessages(messages) {
 }
 
 module.exports = async (req, res) => {
+  const log = createLogger('ai', req);
   if (applyCors(req, res, 'POST,OPTIONS')) return;
 
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
+    return res.status(405).json({ error: 'Method not allowed', reqId: log.reqId });
   }
 
   const userId = await requireAuth(req, res);
@@ -76,18 +78,31 @@ module.exports = async (req, res) => {
   try {
     const { messages, max_tokens } = req.body || {};
     if (!Array.isArray(messages) || messages.length === 0) {
-      return res.status(400).json({ error: 'messages array required' });
+      log.warn('bad request: no messages array', { userId });
+      return res.status(400).json({ error: 'messages array required', reqId: log.reqId });
     }
 
     if (!process.env.ANTHROPIC_API_KEY) {
-      console.error('ANTHROPIC_API_KEY is not set');
-      return res.status(500).json({ error: 'AI service not configured' });
+      log.error('ANTHROPIC_API_KEY is not set', { userId });
+      return res.status(500).json({ error: 'AI service not configured', reqId: log.reqId });
     }
 
     const maxTokens = Math.min(Math.max(Number(max_tokens) || 8000, 256), 16000);
     const { system, messages: anthropicMessages } = convertMessages(messages);
+    const hasImages = anthropicMessages.some(
+      (m) => Array.isArray(m.content) && m.content.some((b) => b.type === 'image')
+    );
+
+    log.info('anthropic request', {
+      userId,
+      model: MODEL,
+      messageCount: anthropicMessages.length,
+      hasImages,
+      maxTokens,
+    });
 
     const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    const started = Date.now();
 
     const response = await client.messages.create({
       model: MODEL,
@@ -102,13 +117,26 @@ module.exports = async (req, res) => {
       .map((block) => block.text)
       .join('');
 
+    log.info('anthropic ok', {
+      userId,
+      durationMs: Date.now() - started,
+      stopReason: response.stop_reason,
+      inputTokens: response.usage?.input_tokens,
+      outputTokens: response.usage?.output_tokens,
+      outputChars: text.length,
+    });
+
+    if (!text) {
+      log.warn('anthropic returned empty text', { userId, stopReason: response.stop_reason });
+    }
+
     // OpenAI-shaped envelope so the existing client parsing is unchanged.
     return res.status(200).json({
       choices: [{ message: { role: 'assistant', content: text } }],
     });
   } catch (error) {
     const status = error?.status || 500;
-    console.error('AI proxy error:', error?.message);
-    return res.status(status).json({ error: 'AI request failed' });
+    log.error('AI proxy error', { userId, status, ...errFields(error) });
+    return res.status(status).json({ error: 'AI request failed', reqId: log.reqId });
   }
 };

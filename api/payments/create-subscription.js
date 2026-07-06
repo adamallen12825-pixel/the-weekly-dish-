@@ -12,11 +12,13 @@
 const { applyCors, requireAuth } = require('../_lib/auth');
 const { getSquareClient, idempotencyKey } = require('../_lib/square');
 const { createClerkClient } = require('@clerk/backend');
+const { createLogger, errFields } = require('../_lib/log');
 
 module.exports = async (req, res) => {
+  const log = createLogger('payments.create', req);
   if (applyCors(req, res, 'POST,OPTIONS')) return;
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
+    return res.status(405).json({ error: 'Method not allowed', reqId: log.reqId });
   }
 
   const userId = await requireAuth(req, res);
@@ -24,14 +26,17 @@ module.exports = async (req, res) => {
 
   const square = getSquareClient();
   if (!square) {
-    return res.status(500).json({ success: false, error: 'Payment system not configured' });
+    log.error('Square not configured (SQUARE_ACCESS_TOKEN missing)', { userId });
+    return res.status(500).json({ success: false, error: 'Payment system not configured', reqId: log.reqId });
   }
 
   try {
     const { sourceId } = req.body || {};
     if (!sourceId) {
-      return res.status(400).json({ success: false, error: 'Missing payment token' });
+      log.warn('missing payment token', { userId });
+      return res.status(400).json({ success: false, error: 'Missing payment token', reqId: log.reqId });
     }
+    log.info('subscription flow start', { userId, env: process.env.SQUARE_ENVIRONMENT || 'sandbox' });
 
     // Get the user's verified email from Clerk (not from the request body).
     const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
@@ -75,13 +80,16 @@ module.exports = async (req, res) => {
       timezone: 'America/New_York',
     });
 
+    log.info('subscription created', { userId, customerId: customer.id, subscriptionId: subscription.subscription?.id });
     return res.status(200).json({
       success: true,
       subscription: subscription.subscription,
       customerId: customer.id,
     });
   } catch (error) {
-    console.error('Create subscription error:', error?.message);
-    return res.status(500).json({ success: false, error: 'Failed to create subscription' });
+    // Square SDK errors carry a .errors array with detail/category.
+    const squareErrors = Array.isArray(error?.errors) ? error.errors : undefined;
+    log.error('create subscription failed', { userId, ...errFields(error), squareErrors });
+    return res.status(500).json({ success: false, error: 'Failed to create subscription', reqId: log.reqId });
   }
 };

@@ -3,18 +3,21 @@
 // falling back to UPC Database if a key is configured.
 
 const { applyCors } = require('../_lib/auth');
+const { createLogger } = require('../_lib/log');
 
 module.exports = async (req, res) => {
+  const log = createLogger('barcode', req);
   if (applyCors(req, res, 'GET,OPTIONS')) return;
   if (req.method !== 'GET') {
-    return res.status(405).json({ error: 'Method not allowed' });
+    return res.status(405).json({ error: 'Method not allowed', reqId: log.reqId });
   }
 
   const raw = req.query.barcode || '';
   const cleanBarcode = String(raw).replace(/[^0-9]/g, '');
   if (!cleanBarcode) {
-    return res.status(400).json({ success: false, error: 'Invalid barcode' });
+    return res.status(400).json({ success: false, error: 'Invalid barcode', reqId: log.reqId });
   }
+  log.info('lookup', { barcode: cleanBarcode });
 
   // Open Food Facts (free, no key).
   try {

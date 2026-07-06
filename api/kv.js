@@ -9,6 +9,7 @@
 //    profile/pantry/meal-plan at a guessable URL.
 
 const { applyCors, requireAuth } = require('./_lib/auth');
+const { createLogger, errFields } = require('./_lib/log');
 
 // Keys must be simple identifiers. This blocks key/path injection while
 // letting the app use whatever data keys it needs.
@@ -40,6 +41,7 @@ if (!global.__devKvStore) global.__devKvStore = new Map();
 const devStore = global.__devKvStore;
 
 module.exports = async (req, res) => {
+  const log = createLogger('kv', req);
   if (applyCors(req, res, 'GET,POST,DELETE,OPTIONS')) return;
 
   const userId = await requireAuth(req, res);
@@ -47,18 +49,24 @@ module.exports = async (req, res) => {
 
   const { key } = req.query;
   if (!key || !KEY_PATTERN.test(key)) {
-    return res.status(400).json({ error: 'Missing or invalid key' });
+    log.warn('bad request: missing/invalid key', { userId, key });
+    return res.status(400).json({ error: 'Missing or invalid key', reqId: log.reqId });
   }
 
   const fullKey = storageKey(userId, key);
   const kv = getKv();
+  if (!kv) {
+    log.warn('no Redis configured — using in-memory dev store (data will not persist)', { userId });
+  }
 
   try {
     switch (req.method) {
       case 'GET': {
         const value = kv ? await kv.get(fullKey) : devStore.get(fullKey);
-        if (value === null || value === undefined) {
-          return res.status(404).json({ error: 'Not found' });
+        const found = value !== null && value !== undefined;
+        log.info('get', { userId, key, found });
+        if (!found) {
+          return res.status(404).json({ error: 'Not found', reqId: log.reqId });
         }
         return res.status(200).json(value);
       }
@@ -66,13 +74,16 @@ module.exports = async (req, res) => {
       case 'POST': {
         const { value } = req.body || {};
         if (value === undefined) {
-          return res.status(400).json({ error: 'Missing value in request body' });
+          log.warn('post with no value', { userId, key });
+          return res.status(400).json({ error: 'Missing value in request body', reqId: log.reqId });
         }
+        const bytes = JSON.stringify(value).length;
         if (kv) {
           await kv.set(fullKey, value);
         } else {
           devStore.set(fullKey, value);
         }
+        log.info('set', { userId, key, bytes });
         return res.status(200).json({ success: true });
       }
 
@@ -82,15 +93,16 @@ module.exports = async (req, res) => {
         } else {
           devStore.delete(fullKey);
         }
+        log.info('delete', { userId, key });
         return res.status(200).json({ success: true });
       }
 
       default:
         res.setHeader('Allow', 'GET, POST, DELETE');
-        return res.status(405).json({ error: `Method ${req.method} not allowed` });
+        return res.status(405).json({ error: `Method ${req.method} not allowed`, reqId: log.reqId });
     }
   } catch (error) {
-    console.error('KV error:', error?.message);
-    return res.status(500).json({ error: 'Storage error' });
+    log.error('storage error', { userId, key, method: req.method, ...errFields(error) });
+    return res.status(500).json({ error: 'Storage error', reqId: log.reqId });
   }
 };
