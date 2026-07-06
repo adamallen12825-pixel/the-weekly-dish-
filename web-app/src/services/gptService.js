@@ -1,5 +1,7 @@
-// GPT Service for AI functionality
-// API calls are proxied through our backend to avoid CORS issues
+// AI Service — calls are proxied through our authenticated backend, which
+// talks to Claude (Anthropic). The API key never reaches the browser.
+import { getAuthToken } from '../utils/authToken';
+
 const DEV_MODE = false; // Always use real API in production
 
 // Get the API base URL - use relative path for production, localhost for dev
@@ -13,17 +15,17 @@ const callGPT = async (messages, timeout = 120000, maxRetries = 2) => {
     const timeoutId = setTimeout(() => controller.abort(), timeout);
 
     try {
-      // Call our backend proxy instead of OpenAI directly (avoids CORS)
-      const response = await fetch(`${API_BASE_URL}/api/openai`, {
+      // Call our authenticated backend proxy (talks to Claude server-side).
+      const token = await getAuthToken();
+      const response = await fetch(`${API_BASE_URL}/api/ai`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
         },
         body: JSON.stringify({
-          model: 'gpt-4o', // Using full model for better reliability
           messages,
-          temperature: 0.7,
-          max_tokens: 4000 // Ensure we get complete responses
+          max_tokens: 8000 // Ensure we get complete responses
         }),
         signal: controller.signal
       });
@@ -1736,15 +1738,16 @@ export const processImages = async (images) => {
 
       const imageUrl = img.startsWith('data:') ? img : `data:image/jpeg;base64,${img}`;
 
-      // Call our backend proxy instead of OpenAI directly (avoids CORS)
-      const response = await fetch(`${API_BASE_URL}/api/openai`, {
+      // Call our authenticated backend proxy (talks to Claude vision server-side).
+      const token = await getAuthToken();
+      const response = await fetch(`${API_BASE_URL}/api/ai`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
         },
         signal: controller.signal,
         body: JSON.stringify({
-          model: 'gpt-4o',
           messages: [
             {
               role: 'system',

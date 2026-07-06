@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useUser } from '@clerk/clerk-react';
-import kvService from '../services/kvService';
+import { getAuthToken } from '../utils/authToken';
 
 function Subscribe() {
   const { user, isSignedIn } = useUser();
@@ -66,31 +66,27 @@ function Subscribe() {
       const result = await card.tokenize();
       
       if (result.status === 'OK') {
-        // Send token to your backend to create subscription
-        const response = await fetch(`${process.env.REACT_APP_API_URL}/api/payments/create-subscription`, {
+        // Send the payment token to our authenticated backend. The server
+        // derives the user id and email from the verified session token and
+        // sets the plan/price itself — none of that is trusted from the client.
+        const authToken = await getAuthToken();
+        const response = await fetch(`/api/payments/create-subscription`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
           },
           body: JSON.stringify({
             sourceId: result.token,
-            userId: user.id,
-            email: user.primaryEmailAddress?.emailAddress,
-            planId: 'WEEKLY_DISH_MONTHLY', // Your Square subscription plan ID
           }),
         });
 
         const data = await response.json();
-        
+
         if (data.success) {
           setSubscribed(true);
           alert('Welcome to The Weekly Dish! Your subscription is active.');
-          
-          // Store subscription status to cloud
-          if (user) {
-            await kvService.set(user.id, 'subscriptionStatus', 'active');
-          }
-          
+
           // Redirect to dashboard
           setTimeout(() => {
             window.location.href = '/dashboard';
@@ -113,15 +109,14 @@ function Subscribe() {
   const handleManageSubscription = async () => {
     setLoading(true);
     try {
-      // Create customer portal session
-      const response = await fetch(`${process.env.REACT_APP_API_URL}/api/payments/customer-portal`, {
+      // Create customer portal session (server identifies the user by token).
+      const authToken = await getAuthToken();
+      const response = await fetch(`/api/payments/customer-portal`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
         },
-        body: JSON.stringify({
-          userId: user.id,
-        }),
       });
 
       const data = await response.json();
@@ -167,23 +162,6 @@ function Subscribe() {
           <p>🎉 Start with a 7-day free trial!</p>
           <p style={styles.cancelText}>Cancel anytime, no questions asked</p>
         </div>
-
-        {/* SKIP PAYMENT BUTTON */}
-        <button 
-          onClick={async () => {
-            if (user) {
-              await kvService.set(user.id, 'subscriptionStatus', 'active');
-            }
-            window.location.href = '/dashboard';
-          }}
-          style={{
-            ...styles.button, 
-            backgroundColor: '#ff9800',
-            marginBottom: '20px'
-          }}
-        >
-          SKIP PAYMENT - ACCESS DASHBOARD NOW
-        </button>
 
         {!subscribed ? (
           <>

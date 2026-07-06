@@ -3,8 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "dependencies": {
-    "@clerk/clerk-sdk-node": "^5.0.0",
-    "@vercel/blob": "^1.1.1",
-    "@vercel/kv": "^3.0.0"
+    "@anthropic-ai/sdk": "^0.110.0",
+    "@clerk/backend": "^3.11.0",
+    "@upstash/redis": "^1.38.0",
+    "square": "^43.2.1"
   }
 }

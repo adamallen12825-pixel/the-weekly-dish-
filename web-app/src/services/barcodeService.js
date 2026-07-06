@@ -1,7 +1,8 @@
 // Import local database for instant lookup
 import { lookupBarcodeLocal } from '../data/productDatabase';
 
-const API_URL = process.env.REACT_APP_API_URL || 'https://weekly-dish-api.vercel.app';
+// Same-origin API (consolidated onto the main site).
+const API_URL = process.env.REACT_APP_API_URL || '';
 
 export const lookupBarcode = async (barcode) => {
   try {

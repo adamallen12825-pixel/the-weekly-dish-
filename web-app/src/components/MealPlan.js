@@ -505,7 +505,9 @@ function MealPlan({ user, profile: profileProp }) {
           day: day.day,
           meals: day.meals
         })),
-        sharedBy: user?.primaryEmailAddress?.emailAddress || 'Anonymous',
+        // Don't embed the user's email in a shareable link (it's base64, not
+        // encrypted). Use a non-identifying display name instead.
+        sharedBy: user?.firstName || 'A Weekly Dish User',
         sharedDate: new Date().toISOString()
       };
 

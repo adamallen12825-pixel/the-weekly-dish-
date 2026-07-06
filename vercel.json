@@ -3,11 +3,8 @@
   "buildCommand": "cd web-app && npm run build",
   "outputDirectory": "web-app/build",
   "functions": {
-    "api/openai.js": {
+    "api/ai.js": {
       "maxDuration": 60
-    },
-    "api/kv.js": {
-      "maxDuration": 10
     },
     "api/**/*.js": {
       "maxDuration": 30

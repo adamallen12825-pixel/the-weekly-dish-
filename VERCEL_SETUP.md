@@ -1,112 +1,58 @@
-# Vercel Environment Variables Setup
+# Deployment Setup — The Weekly Dish
 
-## CRITICAL: Your API keys were getting revoked because they were hardcoded in your files!
+The app is a **single Vercel project**: the React app in `web-app/` plus the
+serverless API in `api/`. There is no separate backend anymore.
 
-This has been fixed. Now you MUST set up environment variables in Vercel properly.
+## Required Vercel environment variables
 
-## Required Environment Variables for Vercel
+Set these in the Vercel project (Settings → Environment Variables). They are
+**server-side only** — never prefix secrets with `REACT_APP_`.
 
-Go to your Vercel project → Settings → Environment Variables and add:
+| Variable | Used by | Notes |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | `api/ai.js` | Claude API key. **Server-side only.** This replaces the old OpenAI key. |
+| `CLERK_SECRET_KEY` | auth on every protected endpoint, user count | Clerk secret key. |
+| `UPSTASH_REDIS_REST_URL` | `api/kv.js` | From the Vercel Marketplace Redis (Upstash) integration. `KV_REST_API_URL` also works. |
+| `UPSTASH_REDIS_REST_TOKEN` | `api/kv.js` | Redis token. `KV_REST_API_TOKEN` also works. |
+| `SQUARE_ACCESS_TOKEN` | payments | Square secret. **Server-side only.** |
+| `SQUARE_ENVIRONMENT` | payments | `sandbox` (default) or `production`. Set to `production` to take real payments. |
+| `SQUARE_LOCATION_ID` | payments | Square location. |
+| `SQUARE_SUBSCRIPTION_PLAN_ID` | payments | The Square subscription **plan variation** ID. |
+| `UPC_DATABASE_KEY` | `api/barcode/[barcode].js` | Optional barcode fallback. |
+| `SUBSCRIPTION_PORTAL_URL` | payments | Optional URL for the "manage subscription" button. |
 
-### For Backend API (backend/api/index.js)
+### Frontend build-time vars (safe to expose — public only)
 
-```
-ANTHROPIC_API_KEY=your-new-anthropic-key-here
-SQUARE_ACCESS_TOKEN=your-square-token-here
-OPENAI_API_KEY=your-openai-key-here (if still using)
-SQUARE_LOCATION_ID=your-square-location-id
-SQUARE_SUBSCRIPTION_PLAN_ID=your-plan-id
-UPC_DATABASE_KEY=your-upc-key (optional)
-```
+| Variable | Notes |
+|---|---|
+| `REACT_APP_CLERK_PUBLISHABLE_KEY` | Clerk publishable (public) key. |
+| `REACT_APP_API_URL` | **Leave empty / unset.** The API is same-origin (`/api/...`). |
+| `REACT_APP_SQUARE_APPLICATION_ID` | Public Square app ID (browser SDK). |
+| `REACT_APP_SQUARE_LOCATION_ID` | Public Square location ID. |
 
-### For Web App (web-app)
+> If a `REACT_APP_API_URL` pointing at `weekly-dish-api.vercel.app` is set in
+> Vercel, delete it — the separate backend project is gone and all API calls now
+> run on the main site.
 
-```
-REACT_APP_ANTHROPIC_API_KEY=your-new-anthropic-key-here
-REACT_APP_CLERK_PUBLISHABLE_KEY=pk_live_Y2xlcmsudGhld2Vla2x5LWRpc2guY29tJA
-REACT_APP_API_URL=https://weekly-dish-api.vercel.app
-REACT_APP_SQUARE_APPLICATION_ID=your-square-app-id
-REACT_APP_SQUARE_LOCATION_ID=your-square-location-id
-REACT_APP_SQUARE_ACCESS_TOKEN=your-square-access-token
-```
+## One-time actions before launch
 
-## How to Add Environment Variables in Vercel
+1. **Rotate the OpenAI key** in the OpenAI dashboard — the previous key was
+   compiled into an old public web bundle and must be treated as compromised.
+   (The app no longer uses OpenAI.)
+2. Provision the **Redis (Upstash)** integration and set its env vars.
+3. Set `ANTHROPIC_API_KEY`.
+4. For live payments: set `SQUARE_ENVIRONMENT=production` with production Square
+   credentials, and test the subscription flow end-to-end in the Square sandbox
+   first.
 
-1. Go to https://vercel.com/dashboard
-2. Select your project
-3. Click on **Settings** tab
-4. Click on **Environment Variables** in the sidebar
-5. For each variable:
-   - Enter the **Name** (e.g., `ANTHROPIC_API_KEY`)
-   - Enter the **Value** (your actual API key)
-   - Select which environments: **Production**, **Preview**, and **Development** (check all three)
-   - Click **Save**
+## Local development
 
-## After Adding Variables
-
-1. **Redeploy** your project:
-   - Go to Deployments tab
-   - Click the three dots on the latest deployment
-   - Select "Redeploy"
-
-   OR
-
-   - Make any small change to your code and push to trigger a new deployment
-
-2. The new deployment will have access to the environment variables
-
-## Getting New API Keys
-
-### Anthropic (Claude)
-- Go to: https://console.anthropic.com/settings/keys
-- Click "Create Key"
-- Copy and paste into Vercel (never into code files!)
-
-### OpenAI (if needed)
-- Go to: https://platform.openai.com/api-keys
-- Click "Create new secret key"
-- Copy and paste into Vercel (never into code files!)
-
-### Square
-- Go to: https://developer.squareup.com/apps
-- Select your app
-- Get your access token from credentials section
-
-## Why This Happened
-
-Your API keys were hardcoded in these files:
-- ✅ FIXED: `apiConfig.js` (line 3)
-- ✅ FIXED: `backend/api/index.js` (lines 21, 45, 110)
-- ✅ FIXED: `web-app/.env` (line 1)
-- ✅ FIXED: `backend/.env` (line 6)
-- ✅ FIXED: `web-app/src/services/gptService.js` (line 3)
-
-When you deployed to Vercel with hardcoded keys:
-1. OpenAI/Anthropic's bots scanned your deployed code
-2. They detected the API keys
-3. They automatically revoked them for security
-
-## What's Been Fixed
-
-1. ✅ All hardcoded keys removed from code
-2. ✅ Code now ONLY reads from `process.env`
-3. ✅ `.gitignore` updated to protect `.env` files
-4. ✅ No more fallback keys in code
-
-## NEVER DO THIS AGAIN
-
-❌ **WRONG:**
-```javascript
-const API_KEY = process.env.API_KEY || 'sk-ant-api03-...'
+```bash
+cd web-app
+npm install
+npm start        # web app on http://localhost:3000
 ```
 
-✅ **CORRECT:**
-```javascript
-const API_KEY = process.env.API_KEY
-```
-
-## Verification
-
-After setup, check your Vercel deployment logs to make sure there are no errors about missing environment variables.
-
-If you see errors like "API key is undefined", it means the environment variable wasn't set correctly in Vercel.
+`web-app/.env` holds local, public build-time values only. Server-side secrets
+are read from your Vercel environment (or a local `.env` in the project root
+when running the functions locally with `vercel dev`).

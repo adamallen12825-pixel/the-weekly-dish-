@@ -1,5 +1,16 @@
 // KV Storage Service for cross-device sync
-// This service handles all communication with Vercel KV
+// This service handles all communication with the authenticated storage API.
+import { getAuthToken } from '../utils/authToken';
+
+// Build request headers including the Clerk session token so the server can
+// verify the caller and scope data to their account.
+async function authHeaders() {
+  const token = await getAuthToken();
+  return {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+}
 
 class KVStorageService {
   constructor() {
@@ -32,11 +43,9 @@ class KVStorageService {
     }
 
     try {
-      const response = await fetch(`${this.getApiBase()}/kv?userId=${encodeURIComponent(userId)}&key=${encodeURIComponent(key)}`, {
+      const response = await fetch(`${this.getApiBase()}/kv?key=${encodeURIComponent(key)}`, {
         method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: await authHeaders(),
       });
 
       if (response.status === 404) {
@@ -108,21 +117,13 @@ class KVStorageService {
       try {
         const dataSize = JSON.stringify(value).length;
         
-        const response = await fetch(`${this.getApiBase()}/kv?userId=${encodeURIComponent(userId)}&key=${encodeURIComponent(key)}`, {
+        const response = await fetch(`${this.getApiBase()}/kv?key=${encodeURIComponent(key)}`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers: await authHeaders(),
           body: JSON.stringify({ value }),
         });
 
         if (!response.ok) {
-          let errorDetails = '';
-          try {
-            const errorData = await response.json();
-            errorDetails = errorData.details || errorData.error || '';
-          } catch (e) {
-          }
           throw new Error(`Failed to sync pantry: ${response.status}`);
         } else {
         }
@@ -161,11 +162,9 @@ class KVStorageService {
         const dataSize = JSON.stringify(value).length;
         console.log(`Syncing ${key} to cloud (${(dataSize / 1024).toFixed(2)} KB)`);
         
-        const response = await fetch(`${this.getApiBase()}/kv?userId=${encodeURIComponent(userId)}&key=${encodeURIComponent(key)}`, {
+        const response = await fetch(`${this.getApiBase()}/kv?key=${encodeURIComponent(key)}`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers: await authHeaders(),
           body: JSON.stringify({ value }),
         });
 
@@ -228,11 +227,9 @@ class KVStorageService {
     this.pendingWrites.delete(cacheKey);
 
     try {
-      const response = await fetch(`${this.getApiBase()}/kv?userId=${encodeURIComponent(userId)}&key=${encodeURIComponent(key)}`, {
+      const response = await fetch(`${this.getApiBase()}/kv?key=${encodeURIComponent(key)}`, {
         method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: await authHeaders(),
       });
 
       return response.ok;

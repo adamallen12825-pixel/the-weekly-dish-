@@ -41,3 +41,7 @@ web-app/.env
 *.tsbuildinfo
 
 .vercel
+
+# Build output (never commit — bundles can bake in build-time env)
+web-app/build/
+build/
