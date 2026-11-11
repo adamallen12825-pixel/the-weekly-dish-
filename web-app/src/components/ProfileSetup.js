@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { getCloudStorage, setCloudStorage } from '../utils/cloudStorage';
 import kvService from '../services/kvService';
 import './ProfileSetup.css';
 
@@ -100,7 +99,6 @@ function ProfileSetup({ user, onComplete }) {
             };
             setProfile(mergedProfile);
             setIsExistingProfile(true);
-            console.log('Loaded existing profile from cloud with dietType:', mergedProfile.dietType);
           }
           setProfileLoaded(true);
         } catch (error) {
@@ -121,7 +119,6 @@ function ProfileSetup({ user, onComplete }) {
     legacyKeys.forEach(key => {
       if (localStorage.getItem(key)) {
         localStorage.removeItem(key);
-        console.log(`Removed legacy localStorage key: ${key}`);
       }
     });
     
@@ -130,7 +127,6 @@ function ProfileSetup({ user, onComplete }) {
       const userProfileKey = `${user.id}_userProfile`;
       if (localStorage.getItem(userProfileKey)) {
         localStorage.removeItem(userProfileKey);
-        console.log(`Removed user-specific localStorage profile: ${userProfileKey}`);
       }
     }
   }, [user]); // Run when user changes
@@ -161,12 +157,9 @@ function ProfileSetup({ user, onComplete }) {
       e.preventDefault();
     }
     
-    console.log(`handleNext called - current step: ${step}`);
     if (step < 12) {
-      console.log(`Moving to step ${step + 1}`);
       setStep(step + 1);
     } else {
-      console.log('Step 12 reached - starting save process');
       setSaving(true);
       
       try {
@@ -178,38 +171,9 @@ function ProfileSetup({ user, onComplete }) {
         
         if (user) {
           try {
-            // Save profile to KV storage for cross-device sync
-            console.log('Attempting to save profile to cloud:', {
-              userId: user.id,
-              profileSize: JSON.stringify(completedProfile).length,
-              profileKeys: Object.keys(completedProfile)
-            });
-            const saveResult = await kvService.set(user.id, 'profile', completedProfile);
-            console.log('Profile save result:', saveResult);
-            console.log('Profile saved to KV storage');
-            
-            // IMPORTANT: Wait for the cloud sync to complete
-            console.log('Waiting for cloud sync to complete...');
-            await new Promise(resolve => setTimeout(resolve, 3000)); // Wait 3 seconds for sync
-            
-            // Verify the profile saved to cloud
-            console.log('Verifying profile in cloud...');
-            const verifyProfile = await kvService.get(user.id, 'profile', true); // Skip cache
-            if (!verifyProfile) {
-              throw new Error('Profile failed to save to cloud storage');
-            }
-            console.log('Profile verified in cloud!');
-            
-            // Only save completion status to Clerk (small data)
-            const response = await user.update({
-              unsafeMetadata: {
-                ...user.unsafeMetadata,
-                profileCompleted: true,
-                lastUpdated: new Date().toISOString()
-              }
-            });
-            console.log('Profile completion saved to Clerk');
-            
+            // Resolves only once the server has stored the profile.
+            await kvService.set(user.id, 'profile', completedProfile);
+
             // Mark as existing profile for future auto-saves
             setIsExistingProfile(true);
           } catch (error) {
@@ -219,7 +183,6 @@ function ProfileSetup({ user, onComplete }) {
         }
         
         // Only redirect after everything is saved and verified
-        console.log('All saves complete - redirecting to dashboard');
         window.location.href = '/dashboard';
       } catch (error) {
         console.error('Error saving profile:', error);
@@ -369,7 +332,7 @@ function ProfileSetup({ user, onComplete }) {
           ))}
         </div>
 
-        {step === 1 && !user?.publicMetadata?.profileCompleted && !isUpdateMode && (
+        {step === 1 && !isExistingProfile && !isUpdateMode && (
           <div style={{ 
             textAlign: 'center', 
             marginBottom: '20px',
@@ -568,7 +531,6 @@ function ProfileSetup({ user, onComplete }) {
                     name="diet"
                     checked={profile.dietType === diet}
                     onChange={() => {
-                      console.log('Changing diet from', profile.dietType, 'to', diet);
                       setProfile({ ...profile, dietType: diet });
                     }}
                   />
@@ -1066,7 +1028,6 @@ function ProfileSetup({ user, onComplete }) {
                 e.preventDefault();
                 e.stopPropagation();
                 setSaving(true);
-                console.log('Saving profile updates and returning to dashboard');
                 
                 
                 try {
@@ -1077,23 +1038,9 @@ function ProfileSetup({ user, onComplete }) {
                     lastUpdated: new Date().toISOString()
                   };
                   
-                  console.log('Saving updated profile with dietType:', updatedProfile.dietType);
+                  // Resolves only once the server has stored the profile.
                   await kvService.set(user.id, 'profile', updatedProfile);
-                  
-                  // Wait for sync to complete
-                  console.log('Waiting for cloud sync...');
-                  await new Promise(resolve => setTimeout(resolve, 3000)); // Increased to 3 seconds
-                  
-                  // Verify save with fresh data (no cache)
-                  const verifyProfile = await kvService.get(user.id, 'profile', true);
-                  if (!verifyProfile) {
-                    throw new Error('Profile updates failed to save');
-                  }
-                  
-                  console.log('Profile verified in cloud with dietType:', verifyProfile.dietType);
-                  
-                  // Clear the cache to ensure fresh data on next load
-                  
+
                   window.location.href = '/dashboard';
                 } catch (error) {
                   console.error('Error saving profile updates:', error);
@@ -1113,7 +1060,6 @@ function ProfileSetup({ user, onComplete }) {
               onClick={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                console.log(`Button clicked on step ${step}`);
                 handleNext(e);
               }} 
               className="next-btn" 

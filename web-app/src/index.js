@@ -4,6 +4,15 @@ import './index.css';
 import App from './App';
 import reportWebVitals from './reportWebVitals';
 
+// Keep diagnostic logging out of visitors' browser consoles in production.
+// Real errors (console.error / console.warn) are still reported.
+if (process.env.NODE_ENV === 'production') {
+  const quiet = () => {};
+  console.log = quiet;
+  console.debug = quiet;
+  console.info = quiet;
+}
+
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
   <React.StrictMode>

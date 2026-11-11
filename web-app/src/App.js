@@ -1,6 +1,6 @@
-import React, { useEffect, useRef } from 'react';
-import { BrowserRouter as Router, Route, Routes } from 'react-router-dom';
-import { ClerkProvider, SignedIn, SignedOut, UserButton, useUser, useClerk } from '@clerk/clerk-react';
+import React from 'react';
+import { BrowserRouter as Router, Route, Routes, Navigate } from 'react-router-dom';
+import { ClerkProvider, SignedIn, SignedOut, UserButton } from '@clerk/clerk-react';
 import Dashboard from './components/Dashboard';
 import ProfileSetupPage from './components/ProfileSetupPage';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -12,7 +12,6 @@ import PrivacyPolicy from './components/PrivacyPolicy';
 import SharedMealPlan from './components/SharedMealPlan';
 import CustomSignIn from './components/CustomSignIn';
 import CustomSignUp from './components/CustomSignUp';
-import kvService from './services/kvService';
 import './App.css';
 
 // Clerk publishable key - set in environment variables
@@ -80,7 +79,7 @@ function HomePage() {
           </div>
           <div style={styles.feature}>
             <h4>Shopping Lists</h4>
-            <p>Automated shopping lists with Walmart integration for easy ordering</p>
+            <p>Shopping lists built from your meals, with a guided Walmart Shop Mode</p>
           </div>
           <div style={styles.feature}>
             <h4>Budget Tracking</h4>
@@ -105,16 +104,10 @@ function HomePage() {
   );
 }
 
-// Component to handle initial setup
-function InitialSetup() {
-  return null; // Removed cache clearing - it was causing performance issues
-}
-
 function App() {
   return (
     <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY}>
       <Router>
-        <InitialSetup />
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route 
@@ -127,11 +120,7 @@ function App() {
           />
           <Route 
             path="/subscribe" 
-            element={
-              <SignedIn>
-                <Subscribe />
-              </SignedIn>
-            } 
+            element={<Subscribe />} 
           />
           <Route 
             path="/dashboard" 
@@ -167,6 +156,7 @@ function App() {
           <Route path="/terms" element={<TermsOfService />} />
           <Route path="/privacy" element={<PrivacyPolicy />} />
           <Route path="/shared/:shareId" element={<SharedMealPlan />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Router>
     </ClerkProvider>

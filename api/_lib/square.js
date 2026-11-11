@@ -2,6 +2,7 @@
 // live is a config change (set it to "production" + provide production
 // credentials), not a code change.
 
+const crypto = require('crypto');
 const { SquareClient, SquareEnvironment } = require('square');
 
 let client = null;
@@ -22,10 +23,11 @@ function getSquareClient() {
   return client;
 }
 
-// Deterministic-ish idempotency key without Math.random/Date restrictions in
-// this module (serverless can use both freely).
-function idempotencyKey(prefix) {
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+// Idempotency keys are derived from what the request means (user + purpose +
+// payment token), so a retried or double-clicked request can never create a
+// second card or a second subscription. Square caps keys at 45 characters.
+function idempotencyKey(...parts) {
+  return crypto.createHash('sha256').update(parts.join('|')).digest('hex').slice(0, 45);
 }
 
 module.exports = { getSquareClient, idempotencyKey };

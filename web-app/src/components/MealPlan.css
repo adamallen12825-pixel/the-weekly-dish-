@@ -354,3 +354,41 @@
 .delete-plan-btn:hover {
   background: #d32f2f;
 }
+/* Budget summary and plan checks */
+.plan-budget {
+  margin: 0 0 16px;
+  padding: 12px 16px;
+  border-radius: 8px;
+  background: #f1f8f2;
+  border: 1px solid #c8e6c9;
+  color: #2e4a30;
+  font-size: 15px;
+}
+.plan-budget.over {
+  background: #fff4e5;
+  border-color: #ffcc80;
+  color: #7a4a00;
+}
+.plan-budget-note {
+  margin-top: 4px;
+  font-size: 13px;
+  opacity: 0.8;
+}
+.plan-warnings {
+  margin: 0 0 16px;
+  padding: 12px 16px;
+  border-radius: 8px;
+  background: #fff4e5;
+  border: 1px solid #ffcc80;
+  color: #7a4a00;
+  font-size: 14px;
+}
+.plan-warnings ul {
+  margin: 6px 0 0 18px;
+  padding: 0;
+}
+.generate-hint {
+  margin-top: 12px;
+  color: #666;
+  font-size: 14px;
+}

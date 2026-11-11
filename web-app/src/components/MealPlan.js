@@ -2,11 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { generateMealPlan, replaceMeal, generateShoppingList, getDetailedRecipe, generateCustomMeal } from '../services/gptService';
 import MealPlanWeek from './MealPlanWeek';
 import kvService from '../services/kvService';
+import { getAuthToken } from '../utils/authToken';
 import './MealPlan.css';
 
 function MealPlan({ user, profile: profileProp }) {
   const [mealPlan, setMealPlan] = useState(null);
-  const [shoppingList, setShoppingList] = useState(null);
+  const [, setShoppingList] = useState(null);
   const [loading, setLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('');
   const [replacing, setReplacing] = useState({});
@@ -19,8 +20,21 @@ function MealPlan({ user, profile: profileProp }) {
   const [profile, setProfile] = useState(profileProp);
   const [cookingHistory, setCookingHistory] = useState([]);
   const [mealPlanAccepted, setMealPlanAccepted] = useState(false);
+  const [sharing, setSharing] = useState(false);
 
-  // Helper function to save data to Blob storage
+  // Copy a plan before changing it, so saved history is never altered by
+  // edits to the current week.
+  const clonePlan = (plan) => JSON.parse(JSON.stringify(plan));
+
+  // Changing a meal makes the saved shopping list out of date.
+  const invalidateShoppingList = async () => {
+    setShoppingList(null);
+    setMealPlanAccepted(false);
+    await saveUserData('currentShoppingList', null);
+    await saveUserData('mealPlanAccepted', false);
+  };
+
+  // Helper function to save data to cloud storage
   const saveUserData = async (key, value) => {
     if (!user) return;
     try {
@@ -90,6 +104,19 @@ function MealPlan({ user, profile: profileProp }) {
 
       if (savedMealPlan) {
         setMealPlan(savedMealPlan);
+      } else {
+        // A plan the user chose to import from a shared link before signing up.
+        try {
+          const imported = JSON.parse(sessionStorage.getItem('importMealPlan') || 'null');
+          if (imported && Array.isArray(imported.days) && imported.days.length) {
+            const plan = { days: imported.days };
+            setMealPlan(plan);
+            await saveUserData('currentMealPlan', plan);
+          }
+          sessionStorage.removeItem('importMealPlan');
+        } catch {
+          sessionStorage.removeItem('importMealPlan');
+        }
       }
 
       if (savedShoppingList) {
@@ -152,8 +179,6 @@ function MealPlan({ user, profile: profileProp }) {
       let pantryItems = await loadUserData('pantry') || [];
       let removedCount = 0;
 
-      console.log('Starting pantry removal for meal:', meal.name);
-      console.log('Current pantry items:', pantryItems.length);
 
       // Try to get the recipe details to know what ingredients to remove
       try {
@@ -163,12 +188,11 @@ function MealPlan({ user, profile: profileProp }) {
 
         // If not cached, fetch it
         if (!recipe) {
-          console.log('Recipe not cached, fetching...');
           recipe = await getDetailedRecipe(meal, profile);
+          await saveUserData('recipesCache', { ...recipesCache, [meal.name]: recipe });
         }
 
         if (recipe && recipe.ingredients && Array.isArray(recipe.ingredients)) {
-          console.log('Found recipe with', recipe.ingredients.length, 'ingredients');
 
           // Helper function to parse quantity and unit from a string
           const parseQuantity = (str) => {
@@ -225,7 +249,6 @@ function MealPlan({ user, profile: profileProp }) {
 
               const ingredientWords = ingredientName.toLowerCase().split(/\s+/).filter(word => word.length > 2);
 
-              console.log(`\n🔍 Recipe needs: ${recipeQty.quantity} ${recipeQty.unit} ${ingredientName}`);
 
               // Find matching pantry item
               const pantryIndex = pantryItems.findIndex(item => {
@@ -255,12 +278,9 @@ function MealPlan({ user, profile: profileProp }) {
               if (pantryIndex !== -1) {
                 const pantryItem = pantryItems[pantryIndex];
                 const pantryQtyStr = pantryItem.quantity != null ? String(pantryItem.quantity) : '1 count';
-                console.log(`✅ Found in pantry: ${pantryItem.name} (${pantryQtyStr})`);
 
                 // Parse pantry quantity
                 const pantryQty = parseQuantity(pantryQtyStr);
-                console.log(`   Pantry has: ${pantryQty.quantity} ${pantryQty.unit}`);
-                console.log(`   Recipe uses: ${recipeQty.quantity} ${recipeQty.unit}`);
 
                 // Normalize units for comparison
                 const normalizedPantryUnit = normalizeUnit(pantryQty.unit || 'count');
@@ -271,7 +291,6 @@ function MealPlan({ user, profile: profileProp }) {
 
                 // If units don't match, just subtract 1 (assume 1 serving used)
                 if (normalizedPantryUnit !== normalizedRecipeUnit) {
-                  console.log(`   ⚠️ Units don't match (${normalizedPantryUnit} vs ${normalizedRecipeUnit}), subtracting 1 instead`);
                   amountToSubtract = 1;
                 }
 
@@ -279,17 +298,14 @@ function MealPlan({ user, profile: profileProp }) {
 
                 if (newQuantity <= 0) {
                   // Remove item completely if we used it all
-                  console.log(`   ❌ Removing entire item (used ${amountToSubtract}, had ${pantryQty.quantity})`);
                   pantryItems.splice(pantryIndex, 1);
                   removedCount++;
                 } else {
                   // Update quantity - keep the pantry's original unit
                   pantryItems[pantryIndex].quantity = `${newQuantity} ${pantryQty.unit}`;
-                  console.log(`   ✏️ Updated quantity to: ${newQuantity} ${pantryQty.unit}`);
                   removedCount++;
                 }
               } else {
-                console.log(`❌ No match found in pantry for: ${ingredientName}`);
               }
             } catch (ingredientError) {
               console.error(`Error processing ingredient:`, ingredient, ingredientError);
@@ -297,21 +313,13 @@ function MealPlan({ user, profile: profileProp }) {
             }
           }
 
-          console.log('Removed', removedCount, 'items from pantry');
-          console.log('Pantry items remaining:', pantryItems.length);
 
           // Save updated pantry and clear cache to ensure Pantry component sees fresh data
-          console.log('Saving pantry with', pantryItems.length, 'items');
           if (!user || !user.id) {
             console.error('ERROR: No user ID available for pantry save!');
             throw new Error('User not available');
           }
           await kvService.set(user.id, 'pantry', pantryItems);
-          // Also clear the kvService cache for pantry to force reload
-          kvService.cache.delete(`${user.id}:pantry`);
-          // Also update localStorage directly as backup
-          localStorage.setItem(`${user.id}_pantry`, JSON.stringify(pantryItems));
-          console.log('Pantry saved successfully to cloud and localStorage');
 
           // Show success message
           if (removedCount > 0) {
@@ -355,6 +363,7 @@ function MealPlan({ user, profile: profileProp }) {
     }
     
     setLoading(true);
+    setLoadingMessage('Planning your week...');
     try {
       const pantryItems = await loadUserData('pantry') || [];
       
@@ -366,10 +375,9 @@ function MealPlan({ user, profile: profileProp }) {
       };
       
       
-      const plan = await generateMealPlan(enhancedProfile, pantryItems);
-      // Log snacks format for debugging
-      if (plan?.days?.[0]?.meals?.snacks) {
-      }
+      const plan = await generateMealPlan(enhancedProfile, pantryItems, (progress) => {
+        if (progress.stage) setLoadingMessage(`${progress.stage}...`);
+      });
       setMealPlan(plan);
       setShoppingList(null);
       setMealPlanAccepted(false);
@@ -380,9 +388,10 @@ function MealPlan({ user, profile: profileProp }) {
       await saveUserData('currentShoppingList', null);
       await saveUserData('mealPlanAccepted', false);
     } catch (error) {
-      alert(`Failed to generate meal plan: ${error.message}`);
+      alert(error.message || 'Failed to generate the meal plan. Please try again.');
     } finally {
       setLoading(false);
+      setLoadingMessage('');
     }
   };
 
@@ -390,13 +399,14 @@ function MealPlan({ user, profile: profileProp }) {
     if (!mealPlan) return;
 
     setLoading(true);
-    setLoadingMessage('Generating shopping list...');
+    setLoadingMessage('Building your shopping list...');
 
     try {
       // Step 1: Generate shopping list
-      console.log('📝 Generating shopping list...');
       const pantryItems = await loadUserData('pantry') || [];
-      const list = await generateShoppingList(mealPlan, pantryItems, profile);
+      const list = await generateShoppingList(mealPlan, pantryItems, profile, (progress) => {
+        if (progress.stage) setLoadingMessage(`${progress.stage}...`);
+      });
       setShoppingList(list);
 
       // Save to localStorage (Clerk has 8KB limit)
@@ -420,16 +430,19 @@ function MealPlan({ user, profile: profileProp }) {
       await saveUserData('mealPlanHistory', newHistory);
       setMealPlanHistory(newHistory);
 
-      // Step 2: Generate ALL recipes (wait for completion)
-      setLoadingMessage('Generating recipes for all meals...');
-      console.log('🍳 Generating all recipes...');
-      await generateRecipesInBackground();
-      console.log('✅ Everything ready!');
+      // Step 2: Write the recipes. The plan is already accepted and the list is
+      // saved, so a recipe that fails here is simply written later on demand.
+      setLoadingMessage('Writing your recipes...');
+      const missing = await generateRecipesInBackground();
 
-      alert('✅ Meal plan accepted! Shopping list and all recipes are ready.');
+      alert(
+        missing > 0
+          ? `✅ Meal plan accepted! Your shopping list is ready. ${missing} recipe${missing === 1 ? '' : 's'} will be written when you open ${missing === 1 ? 'it' : 'them'}.`
+          : '✅ Meal plan accepted! Shopping list and all recipes are ready.'
+      );
     } catch (error) {
       console.error('Shopping list generation error:', error);
-      alert(`Failed to generate shopping list: ${error.message || 'Unknown error'}`);
+      alert(error.message || 'Failed to generate the shopping list. Please try again.');
     } finally {
       setLoading(false);
       setLoadingMessage('');
@@ -465,12 +478,13 @@ function MealPlan({ user, profile: profileProp }) {
       return;
     }
     
-    const updatedPlan = { ...mealPlan };
+    const updatedPlan = clonePlan(mealPlan);
     const dayIndex = updatedPlan.days.findIndex(d => d.day === day);
     if (dayIndex !== -1) {
-      updatedPlan.days[dayIndex].meals[mealType] = meal;
+      updatedPlan.days[dayIndex].meals[mealType] = clonePlan(meal);
       setMealPlan(updatedPlan);
       await saveUserData('currentMealPlan', updatedPlan);
+      await invalidateShoppingList();
       alert(`Copied ${meal.name} to ${day} ${mealType}`);
     }
   };
@@ -478,145 +492,111 @@ function MealPlan({ user, profile: profileProp }) {
   const reuseEntireWeek = async (historicalPlan) => {
     // Create a new plan with current date but same meals
     const newPlan = {
-      ...historicalPlan,
+      ...clonePlan(historicalPlan),
       dateAccepted: new Date().toISOString(),
       weekStartDate: getWeekStartDate(new Date())
     };
     
     setMealPlan(newPlan);
     await saveUserData('currentMealPlan', newPlan);
-    setShoppingList(null); // Clear shopping list so they need to accept the reused plan
+    await invalidateShoppingList(); // They need to accept the reused plan
     setCurrentWeekIndex(0); // Navigate back to current week
     alert('Reused entire week! Click "Accept Meal Plan" to generate a new shopping list.');
   };
   
-  const handleShareMealPlan = () => {
+  const handleShareMealPlan = async () => {
+    if (!mealPlan) {
+      alert('No meal plan to share');
+      return;
+    }
+    setSharing(true);
     try {
-      if (!mealPlan) {
-        alert('No meal plan to share');
-        return;
+      const token = await getAuthToken();
+      const response = await fetch('/api/share', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({
+          plan: { days: mealPlan.days },
+          // A first name only: the link can be opened by anyone who has it.
+          sharedBy: user?.firstName || 'A Weekly Dish User'
+        })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.id) {
+        throw new Error(data.error || 'Could not create the share link. Please try again.');
       }
-
-      console.log('Starting share process...');
-
-      // Create minimal share data
-      const shareData = {
-        days: mealPlan.days.map(day => ({
-          day: day.day,
-          meals: day.meals
-        })),
-        // Don't embed the user's email in a shareable link (it's base64, not
-        // encrypted). Use a non-identifying display name instead.
-        sharedBy: user?.firstName || 'A Weekly Dish User',
-        sharedDate: new Date().toISOString()
-      };
-
-      // Try to encode the meal plan data as base64
-      let encodedData;
-      try {
-        const jsonString = JSON.stringify(shareData);
-        encodedData = btoa(unescape(encodeURIComponent(jsonString)));
-      } catch (e) {
-        console.error('Error encoding data:', e);
-        alert('Meal plan is too large to share. Please try with a simpler plan.');
-        return;
-      }
-
-      // Generate share URL
-      const url = `${window.location.origin}/shared/${encodedData}`;
-
-      if (url.length > 8000) {
-        alert('Meal plan is too large to share via link. Feature coming soon!');
-        return;
-      }
-
-      setShareLink(url);
+      setShareLink(`${window.location.origin}/shared/${data.id}`);
       setShowShareModal(true);
-      console.log('Share modal should now be visible');
-
     } catch (error) {
-      console.error('Error creating share link:', error);
-      alert(`Failed to create share link: ${error.message}`);
+      alert(error.message);
+    } finally {
+      setSharing(false);
     }
   };
   
-  const copyShareLink = () => {
-    navigator.clipboard.writeText(shareLink);
-    alert('Link copied to clipboard!');
+  const copyShareLink = async () => {
+    try {
+      await navigator.clipboard.writeText(shareLink);
+      alert('Link copied to clipboard!');
+    } catch {
+      alert('Copy failed. Select the link and copy it manually.');
+    }
   };
 
 
+  // Writes a recipe for every meal in the plan that does not have one yet.
+  // Returns how many could not be written (they are fetched later on demand).
   const generateRecipesInBackground = async () => {
-    if (!mealPlan) return;
+    if (!mealPlan) return 0;
 
-    console.log('🍳 Starting background recipe generation...');
-
-    // Get all unique meals
-    const uniqueMeals = new Set();
+    // One recipe per distinct meal, passing the full meal so the recipe uses
+    // the same ingredients the shopping list was built from.
+    const uniqueMeals = new Map();
     mealPlan.days.forEach(day => {
       ['breakfast', 'lunch', 'dinner'].forEach(type => {
-        if (day.meals[type]) {
-          uniqueMeals.add(day.meals[type].name);
-        }
+        const meal = day.meals[type];
+        if (meal && meal.name && !uniqueMeals.has(meal.name)) uniqueMeals.set(meal.name, meal);
       });
     });
 
-    console.log(`Found ${uniqueMeals.size} unique meals to generate recipes for`);
+    const recipes = { ...((await loadUserData('recipesCache')) || {}) };
+    const mealsToGenerate = Array.from(uniqueMeals.values()).filter(meal => !recipes[meal.name]);
+    if (mealsToGenerate.length === 0) return 0;
 
-    // Load existing recipes cache
-    const existingRecipes = await loadUserData('recipesCache') || {};
+    const writeRecipe = async (meal) => {
+      try {
+        recipes[meal.name] = await getDetailedRecipe(meal, profile);
+        return true;
+      } catch (error) {
+        console.error(`Recipe for ${meal.name} failed:`, error.message);
+        return false;
+      }
+    };
 
-    // Filter out meals that are already cached
-    const mealsToGenerate = Array.from(uniqueMeals).filter(mealName => !existingRecipes[mealName]);
-
-    console.log(`${mealsToGenerate.length} recipes need to be generated (${uniqueMeals.size - mealsToGenerate.length} already cached)`);
-
-    if (mealsToGenerate.length === 0) {
-      console.log('All recipes already cached!');
-      return;
-    }
-
-    // Generate recipes in batches to avoid overwhelming the API
+    let failed = 0;
     const batchSize = 3;
     for (let i = 0; i < mealsToGenerate.length; i += batchSize) {
-      const batch = mealsToGenerate.slice(i, i + batchSize);
-      console.log(`Generating batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(mealsToGenerate.length / batchSize)}: ${batch.join(', ')}`);
-
-      await Promise.all(
-        batch.map(async (mealName) => {
-          try {
-            console.log(`Generating recipe for: ${mealName}`);
-            const recipe = await getDetailedRecipe({ name: mealName }, profile);
-
-            // Update cache
-            const updatedCache = await loadUserData('recipesCache') || {};
-            updatedCache[mealName] = recipe;
-            await saveUserData('recipesCache', updatedCache);
-
-            console.log(`✅ Recipe cached for: ${mealName}`);
-          } catch (error) {
-            console.error(`❌ Failed to generate recipe for ${mealName}:`, error);
-          }
-        })
-      );
-
-      // Small delay between batches
-      if (i + batchSize < mealsToGenerate.length) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      }
+      setLoadingMessage(`Writing recipes (${i} of ${mealsToGenerate.length})...`);
+      const outcomes = await Promise.all(mealsToGenerate.slice(i, i + batchSize).map(writeRecipe));
+      failed += outcomes.filter((ok) => !ok).length;
+      // Save after each batch so finished recipes are kept if the tab closes.
+      await saveUserData('recipesCache', { ...recipes });
     }
-
-    console.log('🎉 All recipe generation complete!');
+    return failed;
   };
 
   const handleDeleteMealPlan = async () => {
     if (window.confirm('Are you sure you want to delete this meal plan?')) {
       setMealPlan(null);
       setShoppingList(null);
-      
-      // Clear from localStorage
+      setMealPlanAccepted(false);
+
       await saveUserData('currentMealPlan', null);
       await saveUserData('currentShoppingList', null);
+      await saveUserData('mealPlanAccepted', false);
       await saveUserData('recipesCache', null);
     }
   };
@@ -652,7 +632,7 @@ function MealPlan({ user, profile: profileProp }) {
       // Generate full meal details via OpenAI
       const customMealDetails = await generateCustomMeal(customMealName, profile, mealType);
       
-      const updatedPlan = { ...mealPlan };
+      const updatedPlan = clonePlan(mealPlan);
       
       // Update all selected days with the full meal details
       daysToUpdate.forEach(idx => {
@@ -663,16 +643,14 @@ function MealPlan({ user, profile: profileProp }) {
       });
       
       setMealPlan(updatedPlan);
-      setShoppingList(null); // Require re-acceptance
-      
-      // Save to localStorage
       await saveUserData('currentMealPlan', updatedPlan);
+      await invalidateShoppingList(); // Require re-acceptance
       
       if (daysToUpdate.length > 1) {
         alert(`"${customMealName}" has been set for ${daysToUpdate.length} days!`);
       }
     } catch (error) {
-      alert('Failed to generate custom meal details. Please try again.');
+      alert(error.message || 'Failed to generate custom meal details. Please try again.');
     } finally {
       setReplacing({});
     }
@@ -726,32 +704,35 @@ function MealPlan({ user, profile: profileProp }) {
 
     try {
       const pantryItems = await loadUserData('pantry') || [];
+      // Tell the AI what is already planned so the replacement is not a repeat.
+      const otherMeals = Array.from(new Set(
+        mealPlan.days.flatMap(day => ['breakfast', 'lunch', 'dinner'].map(type => day.meals[type]?.name).filter(Boolean))
+      ));
       const newMeal = await replaceMeal(
         currentMeal,
-        profile,
+        { ...profile, dislikedRecipes: dislikes },
         pantryItems,
-        mealType
+        mealType,
+        otherMeals
       );
       
-      const updatedPlan = { ...mealPlan };
+      const updatedPlan = clonePlan(mealPlan);
       
       // Replace meal on all selected days
       daysToReplace.forEach(idx => {
-        updatedPlan.days[idx].meals[mealType] = newMeal;
+        updatedPlan.days[idx].meals[mealType] = { ...newMeal };
       });
       
       setMealPlan(updatedPlan);
-      setShoppingList(null); // Require re-acceptance
-      
-      // Save to localStorage
       await saveUserData('currentMealPlan', updatedPlan);
+      await invalidateShoppingList(); // Require re-acceptance
       
       if (daysToReplace.length > 1) {
         alert(`${mealType} has been replaced on ${daysToReplace.length} days!`);
       }
     } catch (error) {
       console.error('Error replacing meal:', error);
-      alert(`Failed to replace meal: ${error.message || 'Unknown error'}`);
+      alert(error.message || 'Failed to replace the meal. Please try again.');
     } finally {
       setReplacing({});
     }
@@ -814,8 +795,11 @@ function MealPlan({ user, profile: profileProp }) {
             disabled={loading}
             className="generate-btn"
           >
-            {loading ? 'Generating...' : 'Generate Meal Plan'}
+            {loading ? (loadingMessage || 'Generating...') : 'Generate Meal Plan'}
           </button>
+          {loading && (
+            <p className="generate-hint">This usually takes under a minute. You can keep this tab open while it works.</p>
+          )}
         </div>
       )}
 
@@ -829,6 +813,7 @@ function MealPlan({ user, profile: profileProp }) {
                 <div style={{ display: 'flex', gap: '10px' }}>
                   <button
                     onClick={handleShareMealPlan}
+                    disabled={sharing}
                     style={{
                       padding: '8px 16px',
                       backgroundColor: '#2196F3',
@@ -839,7 +824,7 @@ function MealPlan({ user, profile: profileProp }) {
                       fontSize: '14px'
                     }}
                   >
-                    🔗 Share Plan
+                    {sharing ? 'Creating link...' : '🔗 Share Plan'}
                   </button>
                   {!mealPlanAccepted && (
                     <button
@@ -853,6 +838,30 @@ function MealPlan({ user, profile: profileProp }) {
                 </div>
               </div>
               
+              {(() => {
+                // Honest budget summary, added up from the meals shown.
+                const total = mealPlan.days.reduce((sum, day) => sum + ['breakfast', 'lunch', 'dinner']
+                  .reduce((t, type) => t + (Number(day.meals?.[type]?.estimatedCost) || 0), 0), 0);
+                const budget = Number(profile?.weeklyBudget) || 0;
+                if (!total) return null;
+                const over = budget > 0 && total > budget * 1.02;
+                return (
+                  <div className={`plan-budget ${over ? 'over' : ''}`}>
+                    <strong>Estimated cost of meals: ${total.toFixed(2)}</strong>
+                    {budget > 0 && <span> of your ${budget.toFixed(2)} weekly budget</span>}
+                    {over && <span> — over budget. Replace a pricier meal or raise the budget in your profile.</span>}
+                    <div className="plan-budget-note">Prices are estimates. Your shopping list shows the full grocery total.</div>
+                  </div>
+                );
+              })()}
+
+              {Array.isArray(mealPlan.warnings) && mealPlan.warnings.length > 0 && (
+                <div className="plan-warnings" role="alert">
+                  <strong>Please double-check:</strong>
+                  <ul>{mealPlan.warnings.map((warning, idx) => <li key={idx}>{warning}</li>)}</ul>
+                </div>
+              )}
+
               <MealPlanWeek
                 weekPlan={mealPlan}
                 weekLabel={formatWeekDate(getWeekStartDate(new Date()))}
@@ -885,122 +894,6 @@ function MealPlan({ user, profile: profileProp }) {
               />
             </div>
           )}
-          
-          {/* Old meal plan grid code will be replaced by MealPlanWeek component */}
-          <div style={{ display: 'none' }}>
-            {mealPlan && mealPlan.days && mealPlan.days.map((day, dayIndex) => (
-              <div key={dayIndex} className="day-card">
-                <h4>{day.day}</h4>
-                
-                {['breakfast', 'lunch', 'dinner'].filter(mealType => day.meals && day.meals[mealType]).map(mealType => {
-                  const isReplacing = replacing[`${dayIndex}-${mealType}`];
-                  return (
-                    <div key={mealType} className="meal-item">
-                      <div className="meal-header">
-                        <span className="meal-type">{mealType}</span>
-                        <button
-                          onClick={() => handleReplaceMeal(dayIndex, mealType)}
-                          disabled={Object.keys(replacing).length > 0}
-                          className="replace-btn"
-                        >
-                          {isReplacing ? 'Replacing...' : 'Replace'}
-                        </button>
-                      </div>
-                      <p className="meal-name">{day.meals[mealType]?.name || 'N/A'}</p>
-                      <p className="meal-cost">${day.meals[mealType]?.estimatedCost?.toFixed(2) || '0.00'}</p>
-                      
-                      <div className="meal-actions">
-                        <button
-                          onClick={() => day.meals[mealType] && toggleFavorite(day.meals[mealType].name)}
-                          className={`thumb-btn ${day.meals[mealType] && favorites.includes(day.meals[mealType].name) ? 'active' : ''}`}
-                          title="Like this recipe"
-                          disabled={!day.meals[mealType]}
-                        >
-                          👍
-                        </button>
-                        <button
-                          onClick={() => day.meals[mealType] && toggleDislike(day.meals[mealType].name)}
-                          className={`thumb-btn ${day.meals[mealType] && dislikes.includes(day.meals[mealType].name) ? 'active' : ''}`}
-                          title="Dislike this recipe"
-                          disabled={!day.meals[mealType]}
-                        >
-                          👎
-                        </button>
-                        <button
-                          onClick={() => day.meals[mealType] && handleCookedMeal({...day.meals[mealType], mealType})}
-                          className="cooked-btn"
-                          title="I cooked this"
-                          disabled={!day.meals[mealType]}
-                        >
-                          🍳 Cooked
-                        </button>
-                      </div>
-                      {day.meals[mealType]?.nutrition && (
-                        <div className="meal-nutrition">
-                          <span className="nutrition-badge">Cal: {day.meals[mealType].nutrition.calories}</span>
-                          <span className="nutrition-badge">P: {day.meals[mealType].nutrition.protein}g</span>
-                          <span className="nutrition-badge">C: {day.meals[mealType].nutrition.carbs}g</span>
-                          <span className="nutrition-badge">F: {day.meals[mealType].nutrition.fat}g</span>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-                
-                {/* Display snacks if present */}
-                {day.meals.snacks && day.meals.snacks.length > 0 && (
-                  <div className="snack-section">
-                    <h5 className="snack-header">Snacks</h5>
-                    <div className="snack-list">
-                      {day.meals.snacks.map((snack, idx) => {
-                        // Handle different snack formats
-                        let snackName = snack;
-                        if (typeof snack === 'object') {
-                          snackName = snack.name || snack.title || JSON.stringify(snack);
-                        }
-                        return <p key={idx} className="snack-item">• {snackName}</p>;
-                      })}
-                    </div>
-                  </div>
-                )}
-                
-                {/* Display daily nutritional totals */}
-                {(() => {
-                  // Check if any meal has nutrition data
-                  const hasNutrition = ['breakfast', 'lunch', 'dinner'].some(mealType => 
-                    day.meals[mealType]?.nutrition
-                  );
-                  
-                  if (!hasNutrition) return null;
-                  
-                  const dailyTotals = ['breakfast', 'lunch', 'dinner'].reduce((totals, mealType) => {
-                    const meal = day.meals[mealType];
-                    if (meal?.nutrition) {
-                      totals.calories += meal.nutrition.calories || 0;
-                      totals.protein += meal.nutrition.protein || 0;
-                      totals.carbs += meal.nutrition.carbs || 0;
-                      totals.fat += meal.nutrition.fat || 0;
-                      totals.fiber += meal.nutrition.fiber || 0;
-                    }
-                    return totals;
-                  }, { calories: 0, protein: 0, carbs: 0, fat: 0, fiber: 0 });
-                  
-                  return (
-                    <div className="daily-nutrition-totals">
-                      <h5>Daily Totals</h5>
-                      <div className="nutrition-summary">
-                        <span>Calories: {dailyTotals.calories}</span>
-                        <span>Protein: {dailyTotals.protein}g</span>
-                        <span>Carbs: {dailyTotals.carbs}g</span>
-                        <span>Fat: {dailyTotals.fat}g</span>
-                        <span>Fiber: {dailyTotals.fiber}g</span>
-                      </div>
-                    </div>
-                  );
-                })()}
-              </div>
-            ))}
-          </div>
           
           {currentWeekIndex === 0 && mealPlan && (
             <div className="plan-actions">
@@ -1084,7 +977,7 @@ function MealPlan({ user, profile: profileProp }) {
               color: '#666',
               marginBottom: '20px'
             }}>
-              This link will be valid for 30 days. Recipients can view your meal plan without an account.
+              This link works for 6 months. Anyone with the link can view this meal plan without an account. It shows only the meals, not your profile or pantry.
             </p>
             <button
               onClick={() => setShowShareModal(false)}

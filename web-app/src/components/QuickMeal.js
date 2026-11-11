@@ -24,7 +24,8 @@ function QuickMeal({ user, profile }) {
       }
     };
     loadPantry();
-  }, [user]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   const generateMeal = async () => {
     if (pantryItems.length === 0) {
@@ -42,7 +43,7 @@ function QuickMeal({ user, profile }) {
       setRecipe(result.recipe);
     } catch (error) {
       console.error('Error generating meal:', error);
-      alert('Failed to generate meal suggestion. Please try again.');
+      alert(error.message || 'Failed to generate meal suggestion. Please try again.');
     } finally {
       setLoading(false);
     }

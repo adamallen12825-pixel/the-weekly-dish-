@@ -1,73 +1,45 @@
-// AI proxy — server-side calls to Claude (Anthropic).
-// Requires a signed-in Clerk user and only accepts requests from allowed
-// origins, so the API key is never exposed and the endpoint can't be abused
-// by anonymous traffic to run up the bill.
+// AI endpoint. The browser names a task and sends the household's data; the
+// prompt, model and output format are decided here on the server.
 //
-// Accepts an OpenAI-style { messages, max_tokens } body (system role + optional
-// image_url blocks) and returns an OpenAI-shaped { choices: [{ message }] }
-// envelope, so the existing web client works with minimal changes.
+//   POST /api/ai   { task: "mealPlan" | "shoppingList" | "replaceMeal" |
+//                          "customMeal" | "recipe" | "quickMeal" | "pantryScan",
+//                    input: { ... } }
+//
+// Protection: a verified Clerk session is required, each account has a daily
+// allowance per task plus a per-minute burst limit, and there is no way to send
+// an arbitrary prompt.
+//
+// The response is newline-delimited JSON so long generations never sit silent
+// long enough to time out:
+//   {"type":"progress","stage":"Planning your week","chars":1234}
+//   {"type":"result","data":{...}}        (or)
+//   {"type":"error","error":"...","code":"..."}
 
-const Anthropic = require('@anthropic-ai/sdk');
 const { applyCors, requireAuth } = require('./_lib/auth');
 const { createLogger, errFields } = require('./_lib/log');
+const rateLimit = require('./_lib/rateLimit');
+const entitlement = require('./_lib/entitlement');
+const { generate, AiError, MODEL } = require('./_lib/ai/runner');
+const { TASKS } = require('./_lib/ai/tasks');
 
-const MODEL = 'claude-sonnet-5';
+const DAY = 24 * 60 * 60;
+const LIMIT_MULTIPLIER = Math.max(0.1, Number(process.env.AI_LIMIT_MULTIPLIER) || 1);
 
-// Convert one OpenAI-style content part into an Anthropic content block.
-function convertPart(part) {
-  if (typeof part === 'string') {
-    return { type: 'text', text: part };
+function friendlyError(error) {
+  if (error instanceof AiError) return { message: error.message, code: error.code };
+  const status = error && error.status;
+  if (status === 429 || status === 529) {
+    return { message: 'The AI service is busy right now. Please try again in a minute.', code: 'busy' };
   }
-  if (part.type === 'text') {
-    return { type: 'text', text: part.text };
+  if (error && (error.name === 'APIUserAbortError' || error.name === 'AbortError')) {
+    return { message: 'The request was cancelled.', code: 'cancelled' };
   }
-  if (part.type === 'image_url') {
-    const url = part.image_url?.url || '';
-    const match = /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.*)$/.exec(url);
-    if (match) {
-      return {
-        type: 'image',
-        source: { type: 'base64', media_type: match[1], data: match[2] },
-      };
-    }
-    return { type: 'image', source: { type: 'url', url } };
-  }
-  return null;
-}
-
-// Convert an OpenAI-style messages array into an Anthropic system string plus
-// a user/assistant messages array.
-function convertMessages(messages) {
-  const systemParts = [];
-  const converted = [];
-
-  for (const msg of messages) {
-    if (msg.role === 'system') {
-      systemParts.push(
-        typeof msg.content === 'string'
-          ? msg.content
-          : (msg.content || []).map((p) => p.text || '').join('\n')
-      );
-      continue;
-    }
-
-    const content = Array.isArray(msg.content)
-      ? msg.content.map(convertPart).filter(Boolean)
-      : [{ type: 'text', text: String(msg.content ?? '') }];
-
-    converted.push({
-      role: msg.role === 'assistant' ? 'assistant' : 'user',
-      content,
-    });
-  }
-
-  return { system: systemParts.join('\n\n'), messages: converted };
+  return { message: 'Something went wrong generating that. Please try again.', code: 'ai_failed' };
 }
 
 module.exports = async (req, res) => {
   const log = createLogger('ai', req);
   if (applyCors(req, res, 'POST,OPTIONS')) return;
-
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed', reqId: log.reqId });
   }
@@ -75,68 +47,105 @@ module.exports = async (req, res) => {
   const userId = await requireAuth(req, res);
   if (!userId) return;
 
+  const { task: taskName, input } = req.body || {};
+  const task = Object.prototype.hasOwnProperty.call(TASKS, taskName) ? TASKS[taskName] : null;
+  if (!task || !input || typeof input !== 'object') {
+    log.warn('bad request', { userId, task: String(taskName).slice(0, 40) });
+    return res.status(400).json({
+      error: 'This page is out of date. Please refresh and try again.',
+      code: 'bad_request',
+      reqId: log.reqId,
+    });
+  }
+
   try {
-    const { messages, max_tokens } = req.body || {};
-    if (!Array.isArray(messages) || messages.length === 0) {
-      log.warn('bad request: no messages array', { userId });
-      return res.status(400).json({ error: 'messages array required', reqId: log.reqId });
+    const access = await entitlement.check(userId);
+    if (!access.allowed) {
+      return res.status(402).json({
+        error: 'Your free trial has ended. Subscribe to keep planning meals.',
+        code: 'subscription_required',
+        reqId: log.reqId,
+      });
     }
 
-    if (!process.env.ANTHROPIC_API_KEY) {
-      log.error('ANTHROPIC_API_KEY is not set', { userId });
-      return res.status(500).json({ error: 'AI service not configured', reqId: log.reqId });
+    if (
+      await rateLimit.enforce(req, res, {
+        bucket: 'ai:burst',
+        id: userId,
+        max: 40,
+        windowSeconds: 60,
+        message: 'You are going a little fast. Please wait a moment and try again.',
+      })
+    ) {
+      return;
     }
-
-    const maxTokens = Math.min(Math.max(Number(max_tokens) || 8000, 256), 16000);
-    const { system, messages: anthropicMessages } = convertMessages(messages);
-    const hasImages = anthropicMessages.some(
-      (m) => Array.isArray(m.content) && m.content.some((b) => b.type === 'image')
-    );
-
-    log.info('anthropic request', {
-      userId,
-      model: MODEL,
-      messageCount: anthropicMessages.length,
-      hasImages,
-      maxTokens,
-    });
-
-    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-    const started = Date.now();
-
-    const response = await client.messages.create({
-      model: MODEL,
-      max_tokens: maxTokens,
-      thinking: { type: 'disabled' },
-      ...(system ? { system } : {}),
-      messages: anthropicMessages,
-    });
-
-    const text = (response.content || [])
-      .filter((block) => block.type === 'text')
-      .map((block) => block.text)
-      .join('');
-
-    log.info('anthropic ok', {
-      userId,
-      durationMs: Date.now() - started,
-      stopReason: response.stop_reason,
-      inputTokens: response.usage?.input_tokens,
-      outputTokens: response.usage?.output_tokens,
-      outputChars: text.length,
-    });
-
-    if (!text) {
-      log.warn('anthropic returned empty text', { userId, stopReason: response.stop_reason });
+    if (
+      await rateLimit.enforce(req, res, {
+        bucket: `ai:${taskName}`,
+        id: userId,
+        max: Math.ceil(task.dailyLimit * LIMIT_MULTIPLIER),
+        windowSeconds: DAY,
+        message: "You have reached today's limit for this feature. It resets tomorrow.",
+      })
+    ) {
+      log.warn('daily limit reached', { userId, task: taskName });
+      return;
     }
-
-    // OpenAI-shaped envelope so the existing client parsing is unchanged.
-    return res.status(200).json({
-      choices: [{ message: { role: 'assistant', content: text } }],
-    });
   } catch (error) {
-    const status = error?.status || 500;
-    log.error('AI proxy error', { userId, status, ...errFields(error) });
-    return res.status(status).json({ error: 'AI request failed', reqId: log.reqId });
+    log.error('pre-flight failed', { userId, ...errFields(error) });
+    return res.status(error.status || 500).json({ error: 'Service temporarily unavailable', reqId: log.reqId });
+  }
+
+  // From here on the reply is a stream.
+  res.statusCode = 200;
+  res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-store, no-transform');
+  res.setHeader('X-Accel-Buffering', 'no');
+  const send = (event) => {
+    if (!res.writableEnded) res.write(`${JSON.stringify(event)}\n`);
+  };
+
+  const abort = new AbortController();
+  res.on('close', () => {
+    if (!res.writableEnded) abort.abort();
+  });
+
+  let stage = 'Starting';
+  let lastSent = 0;
+  const onProgress = (nextStage, chars) => {
+    stage = nextStage;
+    const now = Date.now();
+    if (now - lastSent < 500) return;
+    lastSent = now;
+    send({ type: 'progress', stage, chars });
+  };
+  send({ type: 'progress', stage, chars: 0 });
+  // Keep the connection warm while the model is thinking and no text flows.
+  const heartbeat = setInterval(() => send({ type: 'progress', stage }), 8000);
+
+  const started = Date.now();
+  const usage = [];
+  try {
+    const data = await task.handler(input, { generate, onProgress, signal: abort.signal, usage });
+    log.info('task ok', {
+      userId,
+      task: taskName,
+      model: MODEL,
+      durationMs: Date.now() - started,
+      calls: usage.length,
+      inputTokens: usage.reduce((n, u) => n + (u.input_tokens || 0), 0),
+      outputTokens: usage.reduce((n, u) => n + (u.output_tokens || 0), 0),
+    });
+    send({ type: 'result', data });
+  } catch (error) {
+    const { message, code } = friendlyError(error);
+    const level = code === 'bad_request' || code === 'cancelled' ? 'warn' : 'error';
+    log[level]('task failed', { userId, task: taskName, code, durationMs: Date.now() - started, ...errFields(error) });
+    // Do not count our failures against the user's daily allowance.
+    await rateLimit.refund(`ai:${taskName}`, userId, DAY);
+    send({ type: 'error', error: message, code, reqId: log.reqId });
+  } finally {
+    clearInterval(heartbeat);
+    res.end();
   }
 };

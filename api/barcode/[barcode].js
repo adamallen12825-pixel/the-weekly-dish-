@@ -3,7 +3,11 @@
 // falling back to UPC Database if a key is configured.
 
 const { applyCors } = require('../_lib/auth');
-const { createLogger } = require('../_lib/log');
+const { createLogger, errFields } = require('../_lib/log');
+const rateLimit = require('../_lib/rateLimit');
+
+// Never let a slow third-party lookup hang the request.
+const LOOKUP_TIMEOUT_MS = 6000;
 
 module.exports = async (req, res) => {
   const log = createLogger('barcode', req);
@@ -14,15 +18,21 @@ module.exports = async (req, res) => {
 
   const raw = req.query.barcode || '';
   const cleanBarcode = String(raw).replace(/[^0-9]/g, '');
-  if (!cleanBarcode) {
+  if (cleanBarcode.length < 6 || cleanBarcode.length > 14) {
     return res.status(400).json({ success: false, error: 'Invalid barcode', reqId: log.reqId });
+  }
+  try {
+    if (await rateLimit.enforce(req, res, { bucket: 'barcode', id: rateLimit.clientIp(req), max: 60, windowSeconds: 60 })) return;
+  } catch (error) {
+    log.warn('rate limit unavailable', errFields(error));
   }
   log.info('lookup', { barcode: cleanBarcode });
 
   // Open Food Facts (free, no key).
   try {
     const response = await fetch(
-      `https://world.openfoodfacts.org/api/v0/product/${cleanBarcode}.json`
+      `https://world.openfoodfacts.org/api/v0/product/${cleanBarcode}.json`,
+      { signal: AbortSignal.timeout(LOOKUP_TIMEOUT_MS) }
     );
     const data = await response.json();
     if (data.status === 1 && data.product) {
@@ -41,7 +51,7 @@ module.exports = async (req, res) => {
       });
     }
   } catch (err) {
-    console.error('Open Food Facts lookup failed:', err?.message);
+    log.warn('Open Food Facts lookup failed', errFields(err));
   }
 
   // Optional UPC Database fallback.
@@ -52,6 +62,7 @@ module.exports = async (req, res) => {
           Accept: 'application/json',
           Authorization: `Bearer ${process.env.UPC_DATABASE_KEY}`,
         },
+        signal: AbortSignal.timeout(LOOKUP_TIMEOUT_MS),
       });
       if (response.ok) {
         const data = await response.json();
@@ -71,7 +82,7 @@ module.exports = async (req, res) => {
         }
       }
     } catch (err) {
-      console.error('UPC Database lookup failed:', err?.message);
+      log.warn('UPC Database lookup failed', errFields(err));
     }
   }
 

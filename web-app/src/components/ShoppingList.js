@@ -1,276 +1,306 @@
-import React, { useState, useEffect } from 'react';
-import { processShoppingList } from '../services/walmartService';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import kvService from '../services/kvService';
 import './ShoppingList.css';
+
+// Walmart has no public way to fill a cart from another site without their
+// API approval, so the fastest honest route is a guided "Shop Mode": one tap
+// opens each item's Walmart search (in the Walmart app on a phone), one tap
+// confirms it, and progress is saved to the account so a list planned on a
+// computer can be shopped from a phone.
+const WALMART_TAB = 'weekly-dish-walmart';
+
+const walmartUrl = (item) =>
+  `https://www.walmart.com/search?q=${encodeURIComponent(item.searchTerm || item.name || '')}`;
+
+const itemKey = (category, item) => `${category}|${item.name}`;
+
+const quantityLabel = (item) => [item.quantity, item.unit].filter((v) => v !== undefined && v !== '').join(' ');
+
+// "3 lb Bananas" for things bought by weight or count, and
+// "2 × Chicken Thighs Family Pack (4.7 lb pack)" for packaged products.
+const SIMPLE_UNIT = /^[a-z.]{1,8}$/i;
+function itemParts(item) {
+  const name = item.name || '';
+  const unit = String(item.unit || '').trim();
+  const quantity = item.quantity === undefined || item.quantity === '' ? 1 : item.quantity;
+  if (unit && SIMPLE_UNIT.test(unit) && !name.toLowerCase().includes(unit.toLowerCase())) {
+    return { lead: `${quantity} ${unit}`, name, detail: '' };
+  }
+  const repeated = !unit || name.toLowerCase().includes(unit.toLowerCase());
+  return { lead: Number(quantity) === 1 ? '' : `${quantity} ×`, name, detail: repeated ? '' : unit };
+}
+const itemLabel = (item) => {
+  const { lead, name, detail } = itemParts(item);
+  return `${lead ? `${lead} ` : ''}${name}${detail ? ` (${detail})` : ''}`;
+};
 
 function ShoppingList({ user }) {
   const [shoppingList, setShoppingList] = useState(null);
   const [checkedItems, setCheckedItems] = useState({});
-  const [processingWalmart, setProcessingWalmart] = useState(false);
-  const [walmartCart, setWalmartCart] = useState(null);
   const [addingToPantry, setAddingToPantry] = useState(false);
+  const [loadError, setLoadError] = useState('');
+  const [shopMode, setShopMode] = useState(false);
+  const [position, setPosition] = useState(0);
+  const [opened, setOpened] = useState(false);
 
-  // Helper function to load data from cloud storage
-  const loadUserData = async (key) => {
-    if (!user) return null;
-    try {
-      return await kvService.get(user.id, key);
-    } catch (error) {
-      console.error(`Error loading ${key}:`, error);
-      return null;
-    }
-  };
+  const sections = useMemo(
+    () => (shoppingList ? shoppingList.shoppingList?.sections || shoppingList.sections || [] : []),
+    [shoppingList]
+  );
 
-  // Helper function to save data to cloud storage
-  const saveUserData = async (key, value) => {
-    if (!user) return;
-    try {
-      if (value === null || value === undefined) {
-        // Delete from storage when value is null
-        await kvService.delete(user.id, key);
-      } else {
-        await kvService.set(user.id, key, value);
-      }
-    } catch (error) {
-      console.error(`Error saving ${key}:`, error);
-    }
-  };
+  // Every item in store order, for Shop Mode.
+  const allItems = useMemo(
+    () =>
+      sections.flatMap((section) =>
+        (section.items || []).map((item) => ({ ...item, category: section.category, key: itemKey(section.category, item) }))
+      ),
+    [sections]
+  );
+
+  // Identifies this particular list, so ticks from an older list are not reused.
+  const listId = useMemo(
+    () => (shoppingList ? shoppingList.generatedAt || `${allItems.length}:${shoppingList.totalCost}` : ''),
+    [shoppingList, allItems.length]
+  );
 
   useEffect(() => {
     if (!user) return;
-    
     const loadData = async () => {
-      // Load shopping list from cloud storage
-      const storedShoppingList = await loadUserData('currentShoppingList');
-      
-      if (storedShoppingList) {
-        console.log('Loading fresh shopping list from storage');
-        setShoppingList(storedShoppingList);
+      try {
+        const [storedList, progress] = await Promise.all([
+          kvService.get(user.id, 'currentShoppingList', true),
+          kvService.get(user.id, 'shoppingProgress', true),
+        ]);
+        setLoadError('');
+        if (storedList) {
+          setShoppingList(storedList);
+          const id = storedList.generatedAt || '';
+          if (progress && progress.listId === id && progress.checked) setCheckedItems(progress.checked);
+        }
+      } catch (error) {
+        setLoadError('We could not load your shopping list. Check your connection and refresh the page.');
       }
     };
-    
     loadData();
-  }, [user]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
-  const toggleItem = (itemId) => {
-    setCheckedItems(prev => ({
-      ...prev,
-      [itemId]: !prev[itemId]
-    }));
+  const saveProgress = useCallback(
+    (checked) => {
+      if (!user || !listId) return;
+      kvService.set(user.id, 'shoppingProgress', { listId, checked }).catch(() => {});
+    },
+    [user, listId]
+  );
+
+  const setChecked = (key, value) => {
+    setCheckedItems((prev) => {
+      const next = { ...prev };
+      if (value) next[key] = true;
+      else delete next[key];
+      saveProgress(next);
+      return next;
+    });
   };
 
-  const getItemId = (category, index) => `${category}-${index}`;
+  const remaining = allItems.filter((item) => !checkedItems[item.key]);
+  const doneCount = allItems.length - remaining.length;
 
-  const handlePrint = () => {
-    window.print();
+  // --- Shop Mode -----------------------------------------------------------
+
+  const startShopMode = () => {
+    const firstUnchecked = allItems.findIndex((item) => !checkedItems[item.key]);
+    setPosition(firstUnchecked === -1 ? 0 : firstUnchecked);
+    setOpened(false);
+    setShopMode(true);
+  };
+
+  const goTo = (index) => {
+    setPosition(Math.max(0, Math.min(allItems.length - 1, index)));
+    setOpened(false);
+  };
+
+  const openAtWalmart = (item) => {
+    // One named tab is reused for every item so a desktop browser does not
+    // fill up with tabs. The opener link is cut so the other site cannot
+    // reach back into this page.
+    const tab = window.open(walmartUrl(item), WALMART_TAB);
+    if (tab) tab.opener = null;
+    setOpened(true);
+  };
+
+  // Tick the item (or skip it) and move to the next one that is not done.
+  // Skipped items come round again after the end of the list.
+  const markAndAdvance = (item, added) => {
+    const checked = added ? { ...checkedItems, [item.key]: true } : checkedItems;
+    if (added) {
+      setCheckedItems(checked);
+      saveProgress(checked);
+    }
+    setOpened(false);
+
+    for (let step = 1; step < allItems.length; step += 1) {
+      const index = (position + step) % allItems.length;
+      if (!checked[allItems[index].key]) {
+        setPosition(index);
+        return;
+      }
+    }
+    // Nothing else is left.
+    if (checked[item.key]) setPosition(allItems.length); // finished screen
+    else setShopMode(false);
+  };
+
+  // --- other actions -------------------------------------------------------
+
+  const listAsText = () =>
+    sections
+      .map(
+        (section) =>
+          `${section.category}\n${(section.items || [])
+            .map((item) => `- ${itemLabel(item)}`)
+            .join('\n')}`
+      )
+      .join('\n\n');
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(listAsText());
+      alert('Shopping list copied.');
+    } catch {
+      alert('Copy failed on this browser. Use Print instead.');
+    }
+  };
+
+  const handleSendToPhone = async () => {
+    const url = `${window.location.origin}/dashboard?tab=shopping`;
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: 'My Weekly Dish shopping list', text: listAsText(), url });
+      } catch {
+        // The share sheet was dismissed.
+      }
+    } else {
+      handleCopy();
+    }
   };
 
   const handleAddToPantry = async () => {
-    if (!shoppingList) {
-      alert('No shopping list to add to pantry');
-      return;
-    }
-
+    if (!shoppingList) return;
     setAddingToPantry(true);
-    
     try {
-      // Get current pantry items
-      const currentPantry = await loadUserData('pantry') || [];
-      
-      // Get all items from shopping list sections
-      const sections = shoppingList.shoppingList?.sections || shoppingList.sections || [];
-      const newPantryItems = [];
-      
-      sections.forEach(section => {
-        section.items.forEach(item => {
-          // Create pantry item from shopping list item
-          const pantryItem = {
-            id: Date.now().toString() + Math.random(),
-            name: item.name || item.item,
-            category: section.category,
-            quantity: item.quantity || '1',
-            unit: item.unit || '',
-            dateAdded: new Date().toISOString(),
-            fromShoppingList: true
-          };
-          newPantryItems.push(pantryItem);
-        });
-      });
-      
-      // Combine with existing pantry items
-      const updatedPantry = [...currentPantry, ...newPantryItems];
-      
-      // Save to user-specific localStorage
-      await saveUserData('pantry', updatedPantry);
-      
-      // Clear shopping list after adding to pantry
-      await saveUserData('currentShoppingList', null);
+      const currentPantry = (await kvService.get(user.id, 'pantry', true)) || [];
+      const stamp = Date.now();
+      const newPantryItems = allItems.map((item, index) => ({
+        id: `${stamp}-${index}`,
+        name: item.name,
+        category: item.category,
+        quantity: quantityLabel(item) || '1',
+        dateAdded: new Date().toISOString(),
+        fromShoppingList: true,
+      }));
+
+      await kvService.set(user.id, 'pantry', [...currentPantry, ...newPantryItems]);
+      await kvService.delete(user.id, 'currentShoppingList');
+      await kvService.delete(user.id, 'shoppingProgress');
       setShoppingList(null);
       setCheckedItems({});
-      
-      alert(`✅ Success! Added ${newPantryItems.length} items to your pantry.\n\nYour shopping list has been cleared.`);
+      alert(`✅ Added ${newPantryItems.length} items to your pantry.\n\nYour shopping list has been cleared.`);
     } catch (error) {
-      console.error('Error adding to pantry:', error);
-      alert('Failed to add items to pantry. Please try again.');
+      alert('We could not add the items to your pantry. Please try again.');
     } finally {
       setAddingToPantry(false);
     }
   };
 
-  const handleAddToWalmartCart = async () => {
-    // Show coming soon message instead of processing
-    alert('🛒 Walmart Integration Coming Soon!\n\nWe\'re working on automatic cart integration. For now, please use the 🔗 links next to each item to search for products on Walmart.com.\n\nThis feature will be available soon!');
-    return;
-    
-    // Original code commented out for when API is ready
-    /*
-    const profile = loadUserData('profile') || {};
-    
-    if (!profile.zipCode) {
-      alert('Please set your ZIP code in profile settings first');
-      return;
-    }
-
-    setProcessingWalmart(true);
-    try {
-      const sections = shoppingList.shoppingList?.sections || shoppingList.sections || [];
-      const result = await processShoppingList(sections, profile.zipCode);
-      
-      setWalmartCart(result);
-      
-      if (result.cartUrl && result.cartUrl !== 'https://www.walmart.com/cart') {
-        window.open(result.cartUrl, '_blank');
-      } else {
-        alert('No items could be matched to Walmart products. Try regenerating your meal plan to get Walmart product IDs.');
-      }
-    } catch (error) {
-      console.error('Error processing Walmart cart:', error);
-      alert('Failed to create Walmart cart. Please try again.');
-    } finally {
-      setProcessingWalmart(false);
-    }
-    */
-  };
+  if (loadError) {
+    return (
+      <div className="shopping-list-container">
+        <h2>Shopping List</h2>
+        <p className="load-error" role="alert">{loadError}</p>
+      </div>
+    );
+  }
 
   if (!shoppingList) {
     return (
       <div className="shopping-list-container">
         <h2>Shopping List</h2>
-        <p className="empty-message">
-          No shopping list available. Generate a meal plan first!
-        </p>
+        <p className="empty-message">No shopping list yet. Generate and accept a meal plan first!</p>
       </div>
     );
   }
 
-  const sections = shoppingList.shoppingList?.sections || 
-                   shoppingList.sections || 
-                   [];
+  const total = Number(shoppingList.totalCost) || 0;
+  const budget = Number(shoppingList.weeklyBudget) || 0;
+  const overBy = budget > 0 ? total - budget : 0;
+  const current = allItems[position];
 
   return (
     <div className="shopping-list-container">
-      <div className="walmart-notice" style={{
-        backgroundColor: '#e8f4fd',
-        border: '1px solid #0071ce',
-        borderRadius: '8px',
-        padding: '15px',
-        marginBottom: '20px',
-        fontSize: '14px',
-        lineHeight: '1.5'
-      }}>
-        <div style={{ marginBottom: '10px', fontWeight: 'bold', color: '#0071ce' }}>
-          🛒 Walmart Shopping Tips
-        </div>
-        <div style={{ color: '#555' }}>
-          • <strong>Sign in to Walmart.com first!</strong> Your cart will save between tabs<br/>
-          • <strong>Click any item</strong> to search for it on Walmart.com<br/>
-          • <strong>Check the box</strong> to mark items you've added to your cart<br/>
-          • Prices shown are estimates and will be accurate once Walmart API integration is complete<br/>
-          • Soon: Your entire shopping list will automatically sync to Walmart's app with one click!
-        </div>
-      </div>
-      
       <h2>Shopping List</h2>
-      
+
       <div className="list-header">
         <div className="budget-info">
-          <span>Total: ${shoppingList.totalCost?.toFixed(2) || '0.00'}</span>
-          <span>Budget: ${shoppingList.weeklyBudget || '100.00'}</span>
+          <span>Estimated total: ${total.toFixed(2)}</span>
+          <span>Budget: ${budget.toFixed(2)}</span>
         </div>
-        <button
-          onClick={handlePrint}
-          className="print-btn"
-          style={{
-            padding: '8px 16px',
-            fontSize: '14px',
-            fontWeight: 'bold',
-            color: '#333',
-            backgroundColor: '#f0f0f0',
-            border: '1px solid #ddd',
-            borderRadius: '6px',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '5px'
-          }}
-        >
-          🖨️ Print List
+        {overBy > 0.5 && (
+          <p className="over-budget">
+            About ${overBy.toFixed(2)} over budget. Swap a pricier meal in your plan, or check the tips below.
+          </p>
+        )}
+        <p className="price-note">Prices are estimates; your Walmart cart shows the real total.</p>
+      </div>
+
+      <div className="shop-panel">
+        <div className="shop-panel-text">
+          <strong>🛒 Walmart Shop Mode</strong>
+          <span>
+            We line up each item for you. One tap opens it at Walmart{' '}
+            (in the Walmart app on your phone), one tap ticks it off. Sign in to Walmart first so your cart is saved.
+          </span>
+          {doneCount > 0 && (
+            <span className="shop-progress-text">
+              {doneCount} of {allItems.length} items done
+            </span>
+          )}
+        </div>
+        <button className="shop-start-btn" onClick={startShopMode} disabled={allItems.length === 0}>
+          {doneCount > 0 && remaining.length > 0 ? 'Continue shopping' : 'Start shopping'}
         </button>
       </div>
 
+      <div className="list-tools">
+        <button onClick={handleSendToPhone}>📱 Send to phone</button>
+        <button onClick={handleCopy}>📋 Copy list</button>
+        <button onClick={() => window.print()}>🖨️ Print</button>
+      </div>
+
       <div className="shopping-sections">
-        {sections.map((section, sectionIdx) => (
-          <div key={sectionIdx} className="category-section">
+        {sections.map((section) => (
+          <div key={section.category} className="category-section">
             <h3>{section.category}</h3>
             <div className="items-list">
-              {section.items.map((item, idx) => {
-                const itemId = getItemId(section.category, idx);
-                const isChecked = checkedItems[itemId];
-                
+              {(section.items || []).map((item) => {
+                const key = itemKey(section.category, item);
+                const isChecked = Boolean(checkedItems[key]);
                 return (
-                  <div 
-                    key={idx} 
-                    className={`shopping-item ${isChecked ? 'checked' : ''}`}
-                    style={{ 
-                      display: 'flex', 
-                      alignItems: 'center',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    <input 
-                      type="checkbox" 
-                      checked={isChecked || false}
-                      onChange={() => toggleItem(itemId)}
-                      onClick={(e) => e.stopPropagation()}
-                      style={{ 
-                        marginRight: '10px',
-                        cursor: 'pointer'
-                      }}
-                    />
+                  <label key={key} className={`shopping-item ${isChecked ? 'checked' : ''}`}>
+                    <input type="checkbox" checked={isChecked} onChange={(e) => setChecked(key, e.target.checked)} />
+                    <span className="item-name">{itemLabel(item)}</span>
+                    <span className="item-price">${(Number(item.estimatedPrice) || 0).toFixed(2)}</span>
                     <a
-                      href={`https://www.walmart.com/search?q=${encodeURIComponent(item.name)}`}
+                      className="item-find"
+                      href={walmartUrl(item)}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="item-details"
-                      style={{ 
-                        flex: 1,
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        textDecoration: 'none',
-                        color: 'inherit',
-                        padding: '5px'
-                      }}
-                      title={`Search Walmart for: ${item.name}`}
+                      onClick={(e) => e.stopPropagation()}
+                      title={`Find at Walmart: ${item.name}`}
                     >
-                      <span className="item-name">
-                        {item.quantity} {item.unit} {item.name}
-                      </span>
-                      <span className="item-price">
-                        ${item.estimatedPrice?.toFixed(2) || '0.00'}
-                      </span>
+                      Find
                     </a>
-                  </div>
+                  </label>
                 );
               })}
             </div>
@@ -289,62 +319,78 @@ function ShoppingList({ user }) {
         </div>
       )}
 
-      <div className="walmart-section" style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '15px',
-        marginTop: '30px'
-      }}>
-        <button
-          onClick={handleAddToWalmartCart}
-          disabled={processingWalmart}
-          className="walmart-cart-btn"
-          style={{
-            padding: '12px 24px',
-            fontSize: '16px',
-            fontWeight: 'bold',
-            color: 'white',
-            backgroundColor: '#0071ce',
-            border: 'none',
-            borderRadius: '8px',
-            cursor: processingWalmart ? 'not-allowed' : 'pointer',
-            opacity: processingWalmart ? 0.6 : 1,
-          }}
-        >
-          {processingWalmart ? 'Processing...' : '🛒 Order from Walmart (Coming Soon)'}
+      <div className="walmart-section">
+        <button onClick={handleAddToPantry} disabled={addingToPantry} className="add-to-pantry-btn">
+          {addingToPantry ? 'Adding...' : '📦 Groceries are home: add everything to my pantry'}
         </button>
-        
-        <button
-          onClick={handleAddToPantry}
-          disabled={addingToPantry}
-          className="add-to-pantry-btn"
-          style={{
-            padding: '12px 24px',
-            fontSize: '16px',
-            fontWeight: 'bold',
-            color: 'white',
-            backgroundColor: '#4CAF50',
-            border: 'none',
-            borderRadius: '8px',
-            cursor: addingToPantry ? 'not-allowed' : 'pointer',
-            opacity: addingToPantry ? 0.6 : 1,
-          }}
-        >
-          {addingToPantry ? 'Adding...' : '📦 Add Shopping List to Pantry (After Ordering)'}
-        </button>
-        
-        {walmartCart && (
-          <div className="walmart-results">
-            <p>{walmartCart.matchedItems?.length || 0} items matched to Walmart products</p>
-            {walmartCart.unmatchedItems?.length > 0 && (
-              <p className="unmatched-warning">
-                {walmartCart.unmatchedItems.length} items need manual search
-              </p>
-            )}
-          </div>
-        )}
       </div>
 
+      {shopMode && (
+        <div className="shop-mode" role="dialog" aria-modal="true" aria-label="Walmart Shop Mode">
+          <div className="shop-mode-card">
+            <div className="shop-mode-top">
+              <span>
+                {current ? `Item ${position + 1} of ${allItems.length}` : 'All done'}
+              </span>
+              <button className="shop-close" onClick={() => setShopMode(false)} aria-label="Close Shop Mode">
+                ✕
+              </button>
+            </div>
+            <div className="shop-bar">
+              <div className="shop-bar-fill" style={{ width: `${allItems.length ? (doneCount / allItems.length) * 100 : 0}%` }} />
+            </div>
+
+            {current ? (
+              <>
+                <div className="shop-category">{current.category}</div>
+                <div className="shop-item-name">{current.name}</div>
+                <div className="shop-item-meta">
+                  Buy {quantityLabel(current) || '1'} · about ${(Number(current.estimatedPrice) || 0).toFixed(2)}
+                  {checkedItems[current.key] ? ' · ✓ done' : ''}
+                </div>
+
+                {!opened ? (
+                  <button className="shop-primary" onClick={() => openAtWalmart(current)}>
+                    Find at Walmart
+                  </button>
+                ) : (
+                  <>
+                    <button className="shop-primary added" onClick={() => markAndAdvance(current, true)}>
+                      ✓ Added to cart — next item
+                    </button>
+                    <button className="shop-link" onClick={() => openAtWalmart(current)}>
+                      Open Walmart again
+                    </button>
+                  </>
+                )}
+
+                <div className="shop-secondary">
+                  <button onClick={() => goTo(position - 1)} disabled={position === 0}>
+                    ← Back
+                  </button>
+                  <button onClick={() => markAndAdvance(current, true)}>Already have it</button>
+                  <button onClick={() => markAndAdvance(current, false)}>Skip →</button>
+                </div>
+                <p className="shop-hint">
+                  Add the item to your Walmart cart, then come back here. Your progress is saved, so you can stop and
+                  pick up later on any device.
+                </p>
+              </>
+            ) : (
+              <>
+                <div className="shop-item-name">🎉 That's everything!</div>
+                <p className="shop-hint">Head to your Walmart cart to choose pickup or delivery and check out.</p>
+                <a className="shop-primary as-link" href="https://www.walmart.com/cart" target={WALMART_TAB} rel="noopener noreferrer">
+                  Open my Walmart cart
+                </a>
+                <button className="shop-link" onClick={() => setShopMode(false)}>
+                  Back to my list
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

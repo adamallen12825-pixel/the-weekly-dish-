@@ -423,3 +423,33 @@ body {
     font-size: 13px;
   }
 }
+
+/* Save status and load errors */
+.sync-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 12px 20px 0;
+  padding: 10px 14px;
+  background: #fff4e5;
+  border: 1px solid #ffcc80;
+  border-radius: 8px;
+  color: #7a4a00;
+  font-size: 14px;
+}
+.sync-status button {
+  flex-shrink: 0;
+  padding: 6px 12px;
+  background: #fff;
+  border: 1px solid #ffb74d;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.load-error {
+  padding: 14px 16px;
+  background: #fdecea;
+  border: 1px solid #f5c6c2;
+  border-radius: 8px;
+  color: #8a1f17;
+}
