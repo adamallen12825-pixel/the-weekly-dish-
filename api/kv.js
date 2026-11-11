@@ -1,44 +1,36 @@
 // Per-user storage for cross-device sync.
 //
 // Security model:
-//  - The user is authenticated via their Clerk session token (Authorization
-//    header). The user id ALWAYS comes from the verified token, never from the
-//    query string, so a caller can only ever read or write their own data.
-//  - Data is stored in Vercel KV (private, server-side only). There are no
-//    public URLs — the previous public-blob storage exposed every user's
-//    profile/pantry/meal-plan at a guessable URL.
+//  - The user is authenticated via their Clerk session token. The user id
+//    ALWAYS comes from the verified token, never from the request, so a caller
+//    can only read or write their own data.
+//  - Only the app's own data keys are accepted, each value has a size cap, and
+//    writes are rate limited, so an account cannot be used as free storage.
+//  - Data lives in Redis (private, server-side). There are no public URLs.
 
 const { applyCors, requireAuth } = require('./_lib/auth');
 const { createLogger, errFields } = require('./_lib/log');
+const store = require('./_lib/store');
+const rateLimit = require('./_lib/rateLimit');
 
-// Keys must be simple identifiers. This blocks key/path injection while
-// letting the app use whatever data keys it needs.
-const KEY_PATTERN = /^[a-zA-Z0-9_]{1,64}$/;
+// Every key the web app stores, with its maximum size in bytes.
+const KB = 1024;
+const ALLOWED_KEYS = {
+  profile: 32 * KB,
+  tosAcceptance: 4 * KB,
+  pantry: 400 * KB,
+  currentMealPlan: 200 * KB,
+  currentShoppingList: 200 * KB,
+  shoppingProgress: 32 * KB,
+  mealPlanAccepted: 1 * KB,
+  mealPlanHistory: 800 * KB,
+  recipesCache: 800 * KB,
+  recipeFavorites: 32 * KB,
+  recipeDislikes: 32 * KB,
+  cookingHistory: 200 * KB,
+};
 
-function storageKey(userId, key) {
-  return `user:${userId}:${key}`;
-}
-
-// Lazily create the Redis client (Upstash, provisioned via the Vercel
-// Marketplace Redis integration). Falls back to an in-memory store for local
-// dev when the env vars are not configured. Supports both the Upstash-native
-// var names and the KV_* names that older Vercel integrations expose.
-let kvClient = null;
-function getKv() {
-  const url = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
-  if (url && token) {
-    if (!kvClient) {
-      const { Redis } = require('@upstash/redis');
-      kvClient = new Redis({ url, token });
-    }
-    return kvClient;
-  }
-  return null;
-}
-
-if (!global.__devKvStore) global.__devKvStore = new Map();
-const devStore = global.__devKvStore;
+const storageKey = (userId, key) => `user:${userId}:${key}`;
 
 module.exports = async (req, res) => {
   const log = createLogger('kv', req);
@@ -47,25 +39,19 @@ module.exports = async (req, res) => {
   const userId = await requireAuth(req, res);
   if (!userId) return;
 
-  const { key } = req.query;
-  if (!key || !KEY_PATTERN.test(key)) {
-    log.warn('bad request: missing/invalid key', { userId, key });
+  const key = String(req.query.key || '');
+  if (!Object.prototype.hasOwnProperty.call(ALLOWED_KEYS, key)) {
+    log.warn('bad request: unknown key', { userId, key: key.slice(0, 64) });
     return res.status(400).json({ error: 'Missing or invalid key', reqId: log.reqId });
   }
-
   const fullKey = storageKey(userId, key);
-  const kv = getKv();
-  if (!kv) {
-    log.warn('no Redis configured — using in-memory dev store (data will not persist)', { userId });
-  }
+  res.setHeader('Cache-Control', 'no-store');
 
   try {
     switch (req.method) {
       case 'GET': {
-        const value = kv ? await kv.get(fullKey) : devStore.get(fullKey);
-        const found = value !== null && value !== undefined;
-        log.info('get', { userId, key, found });
-        if (!found) {
+        const value = await store.get(fullKey);
+        if (value === null || value === undefined) {
           return res.status(404).json({ error: 'Not found', reqId: log.reqId });
         }
         return res.status(200).json(value);
@@ -73,26 +59,22 @@ module.exports = async (req, res) => {
 
       case 'POST': {
         const { value } = req.body || {};
-        if (value === undefined) {
-          log.warn('post with no value', { userId, key });
+        if (value === undefined || value === null) {
           return res.status(400).json({ error: 'Missing value in request body', reqId: log.reqId });
         }
-        const bytes = JSON.stringify(value).length;
-        if (kv) {
-          await kv.set(fullKey, value);
-        } else {
-          devStore.set(fullKey, value);
+        const bytes = Buffer.byteLength(JSON.stringify(value), 'utf8');
+        if (bytes > ALLOWED_KEYS[key]) {
+          log.warn('value too large', { userId, key, bytes });
+          return res.status(413).json({ error: 'That is too much data to save.', code: 'too_large', reqId: log.reqId });
         }
+        if (await rateLimit.enforce(req, res, { bucket: 'kv:write', id: userId, max: 240, windowSeconds: 60 })) return;
+        await store.set(fullKey, value);
         log.info('set', { userId, key, bytes });
         return res.status(200).json({ success: true });
       }
 
       case 'DELETE': {
-        if (kv) {
-          await kv.del(fullKey);
-        } else {
-          devStore.delete(fullKey);
-        }
+        await store.del(fullKey);
         log.info('delete', { userId, key });
         return res.status(200).json({ success: true });
       }
@@ -103,6 +85,9 @@ module.exports = async (req, res) => {
     }
   } catch (error) {
     log.error('storage error', { userId, key, method: req.method, ...errFields(error) });
-    return res.status(500).json({ error: 'Storage error', reqId: log.reqId });
+    return res.status(error.status || 500).json({ error: 'Storage error', reqId: log.reqId });
   }
 };
+
+module.exports.ALLOWED_KEYS = ALLOWED_KEYS;
+module.exports.storageKey = storageKey;
