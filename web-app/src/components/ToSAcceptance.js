@@ -1,11 +1,9 @@
 import React, { useState } from 'react';
 import { useUser } from '@clerk/clerk-react';
-import { useNavigate } from 'react-router-dom';
 import kvService from '../services/kvService';
 
 function ToSAcceptance() {
   const { user } = useUser();
-  const navigate = useNavigate();
   const [accepted, setAccepted] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -17,33 +15,17 @@ function ToSAcceptance() {
 
     setLoading(true);
     
-    const acceptanceData = {
-      tosAccepted: true,
-      tosAcceptedDate: new Date().toISOString(),
-      tosVersion: '1.0',
-      userEmail: user?.primaryEmailAddress?.emailAddress || user?.email
-    };
-    
-    // Save to CLOUD STORAGE - tied to the ACCOUNT, not the device
+    // Recorded against the account (not the device), with the version agreed to.
     try {
-      await kvService.set(user.id, 'tosAcceptance', acceptanceData);
-      console.log('ToS acceptance saved to cloud');
-    } catch (error) {
-      console.error('Error saving ToS to cloud:', error);
-    }
-    
-    // Also try to save to Clerk metadata (may fail due to permissions)
-    try {
-      await user.update({
-        publicMetadata: {
-          ...user.publicMetadata,
-          ...acceptanceData
-        }
+      await kvService.set(user.id, 'tosAcceptance', {
+        tosAccepted: true,
+        tosAcceptedDate: new Date().toISOString(),
+        tosVersion: '1.0'
       });
-      await user.reload();
     } catch (error) {
-      console.error('Error saving to Clerk (non-fatal):', error);
-      // Continue anyway - cloud storage has the acceptance
+      setLoading(false);
+      alert('We could not save your acceptance. Check your connection and try again.');
+      return;
     }
     
     // Redirect to profile setup for new users

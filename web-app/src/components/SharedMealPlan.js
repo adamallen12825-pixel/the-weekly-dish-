@@ -10,28 +10,52 @@ function SharedMealPlan() {
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    try {
-      // Decode the meal plan data from the URL parameter
-      // Need to reverse the encoding: btoa(unescape(encodeURIComponent(jsonString)))
-      const decodedString = decodeURIComponent(escape(atob(shareId)));
-      const decodedData = JSON.parse(decodedString);
+    let cancelled = false;
 
-      // Check if it's the new format (direct days array) or old format (nested mealPlan)
-      if (decodedData && decodedData.days) {
-        // New format - data is directly in the object
-        setMealPlan(decodedData);
-        setSharedBy(decodedData.sharedBy || 'A Weekly Dish User');
-      } else if (decodedData && decodedData.mealPlan) {
-        // Old format - for backward compatibility
-        setMealPlan(decodedData.mealPlan);
-        setSharedBy(decodedData.sharedBy || 'A Weekly Dish User');
+    const show = (data) => {
+      if (cancelled) return;
+      const plan = data && data.days ? data : data && data.mealPlan;
+      if (plan && Array.isArray(plan.days) && plan.days.length) {
+        setMealPlan(plan);
+        setSharedBy(data.sharedBy || 'A Weekly Dish User');
       } else {
         setError('This meal plan link is invalid or has expired.');
       }
-    } catch (err) {
-      console.error('Error decoding shared meal plan:', err);
-      setError('This meal plan link is invalid or could not be decoded.');
-    }
+    };
+
+    const load = async () => {
+      // Current links: a short id that points at the plan stored on the server.
+      if (/^[A-Za-z0-9_-]{12}$/.test(shareId)) {
+        try {
+          const response = await fetch(`/api/share?id=${encodeURIComponent(shareId)}`);
+          if (response.ok) {
+            show(await response.json());
+            return;
+          }
+          if (response.status !== 404) {
+            if (!cancelled) setError('We could not load this meal plan right now. Please try again in a moment.');
+            return;
+          }
+        } catch {
+          if (!cancelled) setError('We could not load this meal plan. Check your connection and try again.');
+          return;
+        }
+      }
+
+      // Older links carried the whole plan inside the link itself.
+      try {
+        const base64 = shareId.replace(/-/g, '+').replace(/_/g, '/');
+        const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+        show(JSON.parse(new TextDecoder().decode(bytes)));
+      } catch {
+        if (!cancelled) setError('This meal plan link is invalid or has expired.');
+      }
+    };
+
+    load();
+    return () => {
+      cancelled = true;
+    };
   }, [shareId]);
 
   const handleCreateAccount = () => {

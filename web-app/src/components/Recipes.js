@@ -32,17 +32,6 @@ function Recipes({ user }) {
       } else {
         await kvService.set(user.id, key, value);
       }
-      
-      // Update Clerk with status flags only for preferences
-      if (key === 'recipeFavorites' || key === 'recipeDislikes') {
-        await user.update({
-          unsafeMetadata: {
-            ...user.unsafeMetadata,
-            hasRecipePreferences: true,
-            lastPreferencesUpdate: new Date().toISOString()
-          }
-        });
-      }
     } catch (error) {
       console.error(`Error saving ${key}:`, error);
     }
@@ -87,7 +76,8 @@ function Recipes({ user }) {
     };
     
     loadData();
-  }, [user]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   const toggleFavorite = (mealName) => {
     let newFavorites = [...favorites];
@@ -123,25 +113,23 @@ function Recipes({ user }) {
     saveUserData('recipeFavorites', newFavorites);
   };
 
-  const handleCookedRecipe = (recipe) => {
+  const handleCookedRecipe = async (recipe) => {
     if (!window.confirm(`Mark "${recipe.name}" as cooked? This will remove ingredients from your pantry.`)) {
       return;
     }
     
     alert(`✅ Marked as cooked! Pantry updated.`);
     
-    const cookingHistory = loadUserData('cookingHistory') || [];
-    cookingHistory.push({
-      meal: recipe.name,
-      date: new Date().toISOString(),
-      mealType: recipe.mealType
-    });
-    saveUserData('cookingHistory', cookingHistory);
+    const cookingHistory = (await loadUserData('cookingHistory')) || [];
+    saveUserData('cookingHistory', [
+      ...cookingHistory,
+      { meal: recipe.name, date: new Date().toISOString(), mealType: recipe.mealType }
+    ]);
   };
 
   const handleRecipeClick = async (recipe) => {
     // Check cache first
-    const cachedRecipes = loadUserData('recipesCache') || {};
+    const cachedRecipes = (await loadUserData('recipesCache')) || {};
     if (cachedRecipes[recipe.name]) {
       setSelectedRecipe(cachedRecipes[recipe.name]);
       return;
@@ -154,8 +142,7 @@ function Recipes({ user }) {
       setSelectedRecipe(detailed);
       
       // Cache it for next time
-      cachedRecipes[recipe.name] = detailed;
-      saveUserData('recipesCache', cachedRecipes);
+      saveUserData('recipesCache', { ...cachedRecipes, [recipe.name]: detailed });
     } catch (error) {
       console.error('Error loading recipe:', error);
       alert(`Failed to load recipe: ${error.message || 'Please try again'}`);

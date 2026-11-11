@@ -7,6 +7,8 @@ import ShoppingList from './ShoppingList';
 import Recipes from './Recipes';
 import QuickMeal from './QuickMeal';
 import kvService from '../services/kvService';
+import { getAuthToken } from '../utils/authToken';
+import SyncStatus from './SyncStatus';
 
 function Dashboard() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -15,6 +17,9 @@ function Dashboard() {
   const [profile, setProfile] = useState(null);
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [profileError, setProfileError] = useState(false);
+  const [access, setAccess] = useState(null);
   const navigate = useNavigate();
   const { user, isLoaded, isSignedIn } = useUser();
   const { signOut } = useClerk();
@@ -37,26 +42,27 @@ function Dashboard() {
       
       setLoadingProfile(true);
       
-      // Clean up any legacy localStorage data without user ID
-      const legacyKeys = ['userProfile', 'pantryItems', 'mealPlan', 'shoppingList', 'recipes'];
-      legacyKeys.forEach(key => {
-        if (localStorage.getItem(key)) {
-          localStorage.removeItem(key);
-          console.log(`Removed legacy localStorage key: ${key}`);
-        }
-      });
-      
       if (isSignedIn && user) {
-        // Load data from KV storage
-        
-        // Load profile from KV storage for cross-device sync (skip cache for fresh data)
+        // Finish any saves a previous visit could not complete.
+        kvService.resumePending(user.id);
+
         try {
           const profile = await kvService.get(user.id, 'profile');
-          if (profile) {
-            setProfile(profile);
-          }
+          if (profile) setProfile(profile);
+          setProfileError(false);
         } catch (e) {
-          console.error('Error loading profile:', e);
+          setProfileError(true);
+        }
+
+        // Subscription / trial status for the account badge.
+        try {
+          const token = await getAuthToken();
+          const response = await fetch('/api/payments/status', {
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          });
+          if (response.ok) setAccess(await response.json());
+        } catch (e) {
+          // The badge is informational; ignore failures.
         }
       }
       
@@ -64,40 +70,8 @@ function Dashboard() {
     };
     
     loadUserProfile();
-  }, [user, isLoaded, isSignedIn]);
-
-  // TEMPORARILY DISABLED: Periodic account deletion check
-  // Will re-enable after fixing the deletion flag issue
-  /*
-  useEffect(() => {
-    if (!user) return;
-    
-    const checkAccountDeletion = async () => {
-      try {
-        const deletionFlag = await kvService.get(user.id, 'accountDeleted', true); // Skip cache
-        
-        if (deletionFlag && deletionFlag.deleted === true) {
-          
-          // Clear all local data
-          localStorage.clear();
-          sessionStorage.clear();
-          
-          // Sign out and redirect
-          await signOut();
-          window.location.href = '/';
-        }
-      } catch (error) {
-        // Silently ignore errors in periodic check
-      }
-    };
-    
-    // Check every 30 seconds
-    const intervalId = setInterval(checkAccountDeletion, 30000);
-    
-    // Clean up interval on unmount
-    return () => clearInterval(intervalId);
-  }, [user, signOut]);
-  */
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, isLoaded, isSignedIn]);
 
   const handleProfileUpdate = () => {
     // Navigate to profile update page (bypasses the profile check)
@@ -105,76 +79,42 @@ function Dashboard() {
   };
 
 
+  // Deletes the account on the server (data, subscription and sign-in) in one
+  // step, so nothing is left behind if this tab closes part-way through.
   const handleDeleteProfile = async () => {
+    if (!user || deleting) return;
+    setDeleting(true);
     try {
-      if (user) {
-        // FIRST: Set account deletion flag in cloud to notify other devices
-        try {
-          await kvService.set(user.id, 'accountDeleted', { 
-            deleted: true, 
-            deletedAt: new Date().toISOString(),
-            deletedBy: 'user_request'
-          });
-          console.log('Account deletion flag set in cloud');
-        } catch (err) {
-          console.error('Failed to set deletion flag:', err);
-        }
-        
-        // Clear all data from cloud storage
-        const keysToDelete = [
-          'userProfile',
-          'profile',
-          'mealPlan', 
-          'shoppingList',
-          'recipes',
-          'pantry',
-          'recipeFavorites',
-          'recipeDislikes',
-          'mealPlanHistory',
-          'currentMealPlan',
-          'currentShoppingList',
-          'pantryItems',
-          'cookingHistory',
-          'recipesCache',
-          'accountDeleted'  // Also delete the deletion flag itself
-        ];
-        
-        for (const key of keysToDelete) {
-          try {
-            await kvService.delete(user.id, key);
-          } catch (err) {
-            console.log(`Could not delete ${key}:`, err);
-          }
-        }
-        
-        // Clear all local storage
-        localStorage.clear();
-        sessionStorage.clear();
-        
-        
-        // Delete the actual Clerk user account
-        try {
-          await user.delete();
-        } catch (deleteError) {
-          // Even if delete fails, we should still sign out
-        }
-        
-        // Sign out from Clerk to clear the session
-        await signOut();
-        
-        // Force redirect to home page
-        window.location.href = '/';
+      const token = await getAuthToken();
+      const response = await fetch('/api/account', {
+        method: 'DELETE',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to delete account.');
       }
+      kvService.clearLocal(user.id);
+      sessionStorage.clear();
+      try {
+        await signOut();
+      } catch (e) {
+        // The account no longer exists; signing out can fail harmlessly.
+      }
+      window.location.href = '/';
     } catch (error) {
-      console.error('Error deleting account:', error);
-      alert('Failed to delete account. Please try again or contact support.');
+      alert(`${error.message} Please try again or contact support.`);
+      setDeleting(false);
+      setShowDeleteConfirm(false);
     }
-    
-    setShowDeleteConfirm(false);
   };
 
   const getSubscriptionStatus = () => {
-    return 'Premium Account';
+    if (!access) return 'Member';
+    if (access.subscription && access.subscription.active) return 'Premium';
+    if (access.reason === 'trial') return 'Free Trial';
+    if (access.reason === 'beta') return 'Beta Access';
+    return 'Subscription Needed';
   };
 
   if (loadingProfile) {
@@ -247,6 +187,13 @@ function Dashboard() {
         </button>
       </nav>
 
+      <SyncStatus />
+      {profileError && (
+        <p className="load-error" role="alert" style={{ margin: '12px 20px' }}>
+          We could not load your profile. Check your connection and refresh the page.
+        </p>
+      )}
+
       <div className="tab-content">
         {currentTab === 'meal-plan' && <MealPlan user={user} profile={profile} />}
         {currentTab === 'quick-meal' && <QuickMeal user={user} profile={profile} />}
@@ -273,14 +220,23 @@ function Dashboard() {
                 onClick={() => setShowDeleteConfirm(true)}
                 style={{ marginTop: '10px', backgroundColor: '#f44336' }}
               >
-                Delete Profile
+                Delete Account
               </button>
             </div>
             
             <div className="settings-section">
               <h3>Account Status</h3>
               <p>✅ Signed in as: {user?.primaryEmailAddress?.emailAddress}</p>
-              <p>All your data is automatically saved to the cloud</p>
+              <p>All your data is automatically saved to your account</p>
+              <p>Plan: {getSubscriptionStatus()}</p>
+              {access && access.reason === 'trial' && access.trialEndsAt && (
+                <p>Free trial ends {new Date(access.trialEndsAt).toLocaleDateString()}</p>
+              )}
+              {access && (access.enforced || access.subscription) && (
+                <button onClick={() => navigate('/subscribe')}>
+                  {access.subscription && access.subscription.active ? 'Manage Subscription' : 'Subscribe'}
+                </button>
+              )}
             </div>
 
           </div>
@@ -307,12 +263,13 @@ function Dashboard() {
             maxWidth: '400px',
             textAlign: 'center'
           }}>
-            <h3>Delete Profile?</h3>
-            <p>Are you sure you want to delete your profile? This will remove all your preferences, meal plans, pantry items, and shopping lists.</p>
+            <h3>Delete your account?</h3>
+            <p>This permanently deletes your account, including your profile, meal plans, pantry and shopping lists, and cancels any subscription.</p>
             <p style={{ color: '#f44336', fontWeight: 'bold' }}>This action cannot be undone!</p>
             <div style={{ marginTop: '20px' }}>
               <button 
                 onClick={handleDeleteProfile}
+                disabled={deleting}
                 style={{ 
                   backgroundColor: '#f44336', 
                   color: 'white',
@@ -323,7 +280,7 @@ function Dashboard() {
                   cursor: 'pointer'
                 }}
               >
-                Yes, Delete Everything
+                {deleting ? 'Deleting...' : 'Yes, Delete Everything'}
               </button>
               <button 
                 onClick={() => setShowDeleteConfirm(false)}

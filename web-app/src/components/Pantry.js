@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 import { lookupBarcode } from '../services/barcodeService';
 import { processImages } from '../services/gptService';
+import { resizeImage } from '../utils/imageResize';
 import kvService from '../services/kvService';
 import './Pantry.css';
 
@@ -15,42 +16,21 @@ function Pantry({ user }) {
   const fileInputRef = useRef(null);
 
   // Helper function to load data from cloud storage
-  const loadUserData = async (key) => {
-    if (!user) return null;
-    try {
-      return await kvService.get(user.id, key);
-    } catch (error) {
-      return null;
-    }
-  };
-
-  // Helper function to save data to cloud storage
-  const saveUserData = async (key, value) => {
-    if (!user) return;
-    try {
-      await kvService.set(user.id, key, value);
-      
-      // Update Clerk with status flag only
-      if (key === 'pantry') {
-        await user.update({
-          unsafeMetadata: {
-            ...user.unsafeMetadata,
-            hasPantryItems: value && value.length > 0,
-            pantryItemCount: value ? value.length : 0,
-            lastPantryUpdate: new Date().toISOString()
-          }
-        });
-      }
-    } catch (error) {
-    }
-  };
+  const [loadError, setLoadError] = useState('');
 
   useEffect(() => {
     if (!user) return;
     // Load pantry items from cloud storage
     const loadPantry = async () => {
-      const saved = await loadUserData('pantry');
-      if (saved) {
+      let saved = null;
+      try {
+        saved = await kvService.get(user.id, 'pantry', true);
+        setLoadError('');
+      } catch (error) {
+        setLoadError('We could not load your pantry. Check your connection and refresh the page.');
+        return;
+      }
+      if (Array.isArray(saved)) {
         // Ensure all items have IDs (for backward compatibility)
         const itemsWithIds = saved.map((item, index) => {
           if (!item.id) {
@@ -62,7 +42,8 @@ function Pantry({ user }) {
       }
     };
     loadPantry();
-  }, [user]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   useEffect(() => {
     // Initialize scanner when shown
@@ -97,15 +78,13 @@ function Pantry({ user }) {
 
   const savePantryItems = async (items) => {
     setPantryItems(items);
+    if (!user) return;
     try {
-      const result = await saveUserData('pantry', items);
-      
-      // Immediately verify the save worked
-      const verification = await loadUserData('pantry');
-      if (verification?.length !== items.length) {
-      }
+      await kvService.set(user.id, 'pantry', items);
     } catch (error) {
-      alert('Failed to save pantry changes. Please try again.');
+      // The change is kept on this device and retried automatically; the
+      // banner at the top of the page shows that it has not synced yet.
+      console.error('Pantry save failed:', error.message);
     }
   };
 
@@ -135,12 +114,6 @@ function Pantry({ user }) {
       message += `Product: ${productInfo.name}\n`;
       if (productInfo.brand) message += `Brand: ${productInfo.brand}\n`;
       message += `\n📊 Barcode: ${barcode}\n`;
-      if (productInfo.found) {
-        message += `✓ Found in local database`;
-      } else {
-        message += `✓ Identified by GPT-5`;
-      }
-      
       alert(message);
     } catch (error) {
       alert(`Error: Failed to lookup barcode ${barcode}`);
@@ -172,7 +145,8 @@ function Pantry({ user }) {
         let unit = 'item';
         
         if (item.quantity) {
-          const match = item.quantity.match(/^(\d+)\s*(.*)$/);
+          // Items added from a shopping list store the quantity as a number.
+          const match = String(item.quantity).match(/^(\d+)\s*(.*)$/);
           if (match) {
             currentQty = parseInt(match[1]) || 1;
             unit = match[2] || 'item';
@@ -224,20 +198,14 @@ function Pantry({ user }) {
     if (files.length === 0) return;
     
     setProcessing(true);
-    const images = [];
-    
-    // Convert images to base64
-    for (const file of files) {
-      const reader = new FileReader();
-      const base64 = await new Promise((resolve) => {
-        reader.onload = (e) => resolve(e.target.result);
-        reader.readAsDataURL(file);
-      });
-      images.push(base64);
-    }
-    
+
     try {
-      // Send to GPT for processing
+      // Shrink each photo first: full-size phone photos are too big to upload.
+      const images = [];
+      for (const file of files.slice(0, 12)) {
+        images.push(await resizeImage(file));
+      }
+
       const result = await processImages(images);
       
       if (result.success && result.items.length > 0) {
@@ -252,12 +220,12 @@ function Pantry({ user }) {
         }));
         
         savePantryItems([...pantryItems, ...newItems]);
-        alert(`✅ Added ${newItems.length} items from photo!`);
+        alert(`✅ Added ${newItems.length} items from your photo${files.length > 1 ? 's' : ''}!`);
       } else {
-        alert('No items found in the photo. Try a clearer photo.');
+        alert('No food items were found. Try a closer, well-lit photo.');
       }
     } catch (error) {
-      alert('Failed to process photo. Please try again.');
+      alert(error.message || 'Failed to process photo. Please try again.');
     } finally {
       setProcessing(false);
       if (fileInputRef.current) {
@@ -270,6 +238,7 @@ function Pantry({ user }) {
   return (
     <div className="pantry-container">
       <h2>Pantry Management</h2>
+      {loadError && <p className="load-error" role="alert">{loadError}</p>}
 
       <div className="pantry-actions">
         <button onClick={() => setShowScanner(true)} className="barcode-btn">
@@ -375,7 +344,7 @@ function Pantry({ user }) {
                 </div>
                 <div style={{ fontSize: '14px', color: '#666', marginTop: '4px' }}>
                   {item.brand && `${item.brand} • `}
-                  {item.quantity || '1 item'} • {item.category || 'Other'}
+                  {[item.quantity, typeof item.quantity === 'number' ? item.unit : ''].filter(Boolean).join(' ') || '1 item'} • {item.category || 'Other'}
                 </div>
               </div>
               <div style={{ display: 'flex', gap: '5px' }}>

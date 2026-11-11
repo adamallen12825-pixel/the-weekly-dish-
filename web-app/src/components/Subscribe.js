@@ -1,137 +1,151 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useUser } from '@clerk/clerk-react';
 import { getAuthToken } from '../utils/authToken';
 
+// The Square card form must come from the matching environment. Set
+// REACT_APP_SQUARE_ENVIRONMENT=production (with the production application id)
+// when going live; anything else uses the sandbox, where no real money moves.
+const SQUARE_PRODUCTION = process.env.REACT_APP_SQUARE_ENVIRONMENT === 'production';
+const SQUARE_SDK_URL = SQUARE_PRODUCTION
+  ? 'https://web.squarecdn.com/v1/square.js'
+  : 'https://sandbox.web.squarecdn.com/v1/square.js';
+
+async function api(path, options = {}) {
+  const token = await getAuthToken();
+  const response = await fetch(`/api/payments/${path}`, {
+    ...options,
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+  });
+  const data = await response.json().catch(() => ({}));
+  return { ok: response.ok, data };
+}
+
+const formatDate = (value) => {
+  if (!value) return '';
+  const date = new Date(value.length === 10 ? `${value}T12:00:00` : value);
+  return date.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' });
+};
+
 function Subscribe() {
-  const { user, isSignedIn } = useUser();
+  const { isSignedIn } = useUser();
   const [loading, setLoading] = useState(false);
-  const [subscribed, setSubscribed] = useState(false);
+  const [status, setStatus] = useState(null);
+  const [statusLoaded, setStatusLoaded] = useState(false);
   const [squareLoaded, setSquareLoaded] = useState(false);
-  const [card, setCard] = useState(null);
-  const [payments, setPayments] = useState(null);
+  const [message, setMessage] = useState('');
+  const cardRef = useRef(null);
 
-  useEffect(() => {
-    // Load Square Web SDK
-    const script = document.createElement('script');
-    script.src = 'https://sandbox.web.squarecdn.com/v1/square.js';
-    script.async = true;
-    script.onload = () => initializeSquare();
-    document.body.appendChild(script);
-
-    return () => {
-      if (card) {
-        card.destroy();
-      }
-    };
+  const loadStatus = useCallback(async () => {
+    const { ok, data } = await api('status');
+    if (ok) setStatus(data);
+    setStatusLoaded(true);
   }, []);
 
-  const initializeSquare = async () => {
-    if (!window.Square) {
-      console.error('Square.js failed to load');
-      return;
+  useEffect(() => {
+    if (isSignedIn) loadStatus();
+  }, [isSignedIn, loadStatus]);
+
+  const subscription = status && status.subscription;
+  const subscribed = Boolean(subscription && subscription.active);
+  const showCardForm = isSignedIn && statusLoaded && !subscribed;
+
+  // Load the Square card form only when it is needed.
+  useEffect(() => {
+    if (!showCardForm) return undefined;
+    let cancelled = false;
+
+    const initializeSquare = async () => {
+      if (cancelled || !window.Square || cardRef.current) return;
+      try {
+        const payments = window.Square.payments(
+          process.env.REACT_APP_SQUARE_APPLICATION_ID,
+          process.env.REACT_APP_SQUARE_LOCATION_ID
+        );
+        const card = await payments.card();
+        if (cancelled) {
+          card.destroy();
+          return;
+        }
+        await card.attach('#card-container');
+        cardRef.current = card;
+        setSquareLoaded(true);
+      } catch (e) {
+        console.error('Initializing Square Payments failed', e);
+        setMessage('The payment form could not load. Please refresh the page.');
+      }
+    };
+
+    if (window.Square) {
+      initializeSquare();
+    } else {
+      const script = document.createElement('script');
+      script.src = SQUARE_SDK_URL;
+      script.async = true;
+      script.onload = initializeSquare;
+      script.onerror = () => setMessage('The payment form could not load. Please refresh the page.');
+      document.body.appendChild(script);
     }
 
-    try {
-      const payments = window.Square.payments(
-        process.env.REACT_APP_SQUARE_APPLICATION_ID,
-        process.env.REACT_APP_SQUARE_LOCATION_ID
-      );
-      setPayments(payments);
-
-      // Initialize Card payment method
-      const card = await payments.card();
-      await card.attach('#card-container');
-      setCard(card);
-      setSquareLoaded(true);
-    } catch (e) {
-      console.error('Initializing Square Payments failed', e);
-    }
-  };
+    return () => {
+      cancelled = true;
+      if (cardRef.current) {
+        cardRef.current.destroy();
+        cardRef.current = null;
+      }
+      setSquareLoaded(false);
+    };
+  }, [showCardForm]);
 
   const handleSubscribe = async () => {
-    if (!isSignedIn) {
-      alert('Please sign in first');
-      return;
-    }
-
-    if (!card) {
-      alert('Payment form not ready. Please refresh and try again.');
-      return;
-    }
-
+    if (!cardRef.current || loading) return;
     setLoading(true);
-
+    setMessage('');
     try {
-      // Generate payment token
-      const result = await card.tokenize();
-      
-      if (result.status === 'OK') {
-        // Send the payment token to our authenticated backend. The server
-        // derives the user id and email from the verified session token and
-        // sets the plan/price itself — none of that is trusted from the client.
-        const authToken = await getAuthToken();
-        const response = await fetch(`/api/payments/create-subscription`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
-          },
-          body: JSON.stringify({
-            sourceId: result.token,
-          }),
-        });
-
-        const data = await response.json();
-
-        if (data.success) {
-          setSubscribed(true);
-          alert('Welcome to The Weekly Dish! Your subscription is active.');
-
-          // Redirect to dashboard
-          setTimeout(() => {
-            window.location.href = '/dashboard';
-          }, 2000);
-        } else {
-          alert(data.error || 'Subscription failed. Please try again.');
-        }
-      } else {
-        console.error('Tokenization failed', result);
-        alert('Payment validation failed. Please check your card details.');
+      const result = await cardRef.current.tokenize();
+      if (result.status !== 'OK') {
+        setMessage('Please check your card details and try again.');
+        return;
       }
-    } catch (error) {
-      console.error('Subscribe error:', error);
-      alert('Something went wrong. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleManageSubscription = async () => {
-    setLoading(true);
-    try {
-      // Create customer portal session (server identifies the user by token).
-      const authToken = await getAuthToken();
-      const response = await fetch(`/api/payments/customer-portal`, {
+      // The server takes the user and the price from its own records; only
+      // the one-time payment token is sent from here.
+      const { ok, data } = await api('create-subscription', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
-        },
+        body: JSON.stringify({ sourceId: result.token }),
       });
-
-      const data = await response.json();
-      if (data.portalUrl) {
-        window.location.href = data.portalUrl;
+      if (ok && data.success) {
+        setMessage(data.alreadySubscribed ? 'You already have an active subscription.' : 'Welcome! Your subscription is active.');
+        await loadStatus();
       } else {
-        alert('Unable to access customer portal. Please contact support.');
+        setMessage(data.error || 'We could not start your subscription. Please try again.');
       }
     } catch (error) {
-      console.error('Portal error:', error);
-      alert('Something went wrong. Please try again.');
+      setMessage('Something went wrong. Please try again.');
     } finally {
       setLoading(false);
     }
   };
+
+  const handleCancel = async () => {
+    if (!window.confirm('Cancel your subscription? You keep access until the end of the period you have paid for.')) return;
+    setLoading(true);
+    setMessage('');
+    try {
+      const { ok, data } = await api('cancel', { method: 'POST' });
+      if (ok && data.success) {
+        setMessage(data.endsOn ? `Your subscription is cancelled. You have access until ${formatDate(data.endsOn)}.` : 'Your subscription is cancelled.');
+        await loadStatus();
+      } else {
+        setMessage(data.error || 'We could not cancel your subscription. Please try again.');
+      }
+    } catch (error) {
+      setMessage('Something went wrong. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const inTrial = status && status.reason === 'trial' && status.trialEndsAt;
+  const trialEnded = status && status.reason === 'trial_ended';
 
   return (
     <div className="subscribe-container" style={styles.container}>
@@ -141,70 +155,71 @@ function Subscribe() {
           <span style={styles.priceAmount}>$9.99</span>
           <span style={styles.pricePeriod}>/month</span>
         </div>
-        
+
         <div style={styles.features}>
           <h3>What's Included:</h3>
           <ul style={styles.featureList}>
-            <li>✓ Personalized Meal Planning</li>
-            <li>✓ Smart Shopping Lists</li>
-            <li>✓ Pantry Management with Camera Scanning</li>
-            <li>✓ Budget Optimization ($20-$100/week)</li>
-            <li>✓ Nutrition Tracking</li>
-            <li>✓ Recipe Storage & Instructions</li>
-            <li>✓ Walmart Integration</li>
+            <li>✓ Personalized Weekly Meal Plans</li>
+            <li>✓ Smart Shopping Lists Built From Your Meals</li>
+            <li>✓ Pantry Tracking with Barcode and Photo Scanning</li>
+            <li>✓ Plans Built Around Your Grocery Budget</li>
+            <li>✓ Nutrition Targets</li>
+            <li>✓ Full Recipes with Step-by-Step Instructions</li>
+            <li>✓ Walmart Shop Mode</li>
             <li>✓ Weekly Meal Prep Support</li>
-            <li>✓ Diet Compliance (Keto, Paleo, Vegan, etc.)</li>
+            <li>✓ Diet Support (Keto, Paleo, Vegan and more)</li>
             <li>✓ Family-Friendly Meal Plans</li>
           </ul>
         </div>
 
         <div style={styles.trial}>
-          <p>🎉 Start with a 7-day free trial!</p>
+          {inTrial && <p>🎉 Your free trial runs until {formatDate(status.trialEndsAt)}.</p>}
+          {trialEnded && <p>Your free trial has ended. Subscribe to keep planning meals.</p>}
           <p style={styles.cancelText}>Cancel anytime, no questions asked</p>
         </div>
 
-        {!subscribed ? (
+        {message && <p style={styles.signInText} role="status">{message}</p>}
+
+        {!isSignedIn ? (
           <>
-            {isSignedIn ? (
-              <>
-                <div id="card-container" style={styles.cardContainer}></div>
-                {!squareLoaded && (
-                  <div style={styles.loadingCard}>Loading payment form...</div>
-                )}
-                <button 
-                  onClick={handleSubscribe} 
-                  disabled={loading || !squareLoaded}
-                  style={loading || !squareLoaded ? styles.buttonDisabled : styles.button}
-                >
-                  {loading ? 'Processing...' : 'Start Free Trial'}
-                </button>
-              </>
-            ) : (
-              <>
-                <p style={styles.signInText}>Please sign in to subscribe</p>
-                <a href="/sign-in" style={styles.button}>Sign In to Continue</a>
-              </>
+            <p style={styles.signInText}>Please sign in to subscribe</p>
+            <a href="/sign-in" style={styles.button}>Sign In to Continue</a>
+          </>
+        ) : !statusLoaded ? (
+          <div style={styles.loadingCard}>Loading your account...</div>
+        ) : subscribed ? (
+          <>
+            <p style={styles.signInText}>
+              {subscription.endsOn
+                ? `Your subscription is cancelled and ends on ${formatDate(subscription.endsOn)}.`
+                : `✅ Your subscription is active${subscription.paidThrough ? ` (paid through ${formatDate(subscription.paidThrough)})` : ''}.`}
+            </p>
+            <a href="/dashboard" style={styles.button}>Go to Dashboard</a>
+            {!subscription.endsOn && (
+              <button onClick={handleCancel} disabled={loading} style={styles.buttonSecondary}>
+                {loading ? 'Working...' : 'Cancel Subscription'}
+              </button>
             )}
           </>
         ) : (
-          <button 
-            onClick={handleManageSubscription} 
-            disabled={loading}
-            style={styles.buttonSecondary}
-          >
-            {loading ? 'Loading...' : 'Manage Subscription'}
-          </button>
+          <>
+            <div id="card-container" style={styles.cardContainer}></div>
+            {!squareLoaded && <div style={styles.loadingCard}>Loading payment form...</div>}
+            <button
+              onClick={handleSubscribe}
+              disabled={loading || !squareLoaded}
+              style={loading || !squareLoaded ? styles.buttonDisabled : styles.button}
+            >
+              {loading ? 'Processing...' : 'Subscribe'}
+            </button>
+          </>
         )}
 
         <div style={styles.footer}>
           <p style={styles.footerText}>
             Secure payment powered by Square<br/>
-            Your payment info is never stored on our servers
+            Your card details go straight to Square and never touch our servers
           </p>
-          <div style={styles.badges}>
-            <span style={styles.badge}>🔒 SSL Secured</span>
-            <span style={styles.badge}>💳 PCI Compliant</span>
-          </div>
         </div>
       </div>
     </div>
